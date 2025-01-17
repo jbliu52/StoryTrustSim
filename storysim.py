@@ -50,16 +50,58 @@ class StorySimulator:
                 current_locations[person].append(current_locations[person][-1])
         return current_locations
 
+    def observation_event(self, subject, target, location, current_locations):
+        # Insert an observation event
+        new = self.locations[-1] if location != self.locations[1] else random.choice(self.locations[:-1])
+        event_string = f"""*{self.relation}({subject}, {location})
+        *{self.relation}({target}, {location})
+        *{self.relation}({subject}, {new})
+        ---
+        """
+        current_locations = self.update_state(subject, location, current_locations)
+        current_locations = self.update_state(target, location, current_locations)
+        current_locations = self.update_state(subject, new, current_locations)
+        
+        return event_string, current_locations
+        
     
+    def align_for_event(self, actors: list, location: str, current_locations):
+        events = ''
+        for actor in actors:
+            done = False
+            while(not done):
+                # cur = current_locations[actor][-1]
+                possible = self.possible_moves[actor]
+                if location not in possible:
+                    new_loc = random.choice(possible)
+                    current_locations = self.update_state(actor, new_loc, current_locations)
+                    events += f"#{self.relation}({actor}, {new_loc})\n"
+                else:
+                    done = True
+        return events, current_locations
+        
+    # TODO: Is it smart to make the string as you generate the sequences? Probably not.
     def run_simulation(self, steps):
         current_locations = {person: [self.locations[-1]] for person in self.people}
         sequences = ""
+        
         for t in range(steps):
-            person = random.choice(self.people)
-            cur_loc = current_locations[person]
-            loc = random.choice(self.possible_moves[person])
-            current_locations = self.update_state(person, loc, current_locations)
-            sequences += f"{self.relation}({person}, {loc}, {t})\n"
+            obs_event = random.choice([True, False, False, False, False, False])
+            # This is where the observation event needs to happen. For now I'm giving it a 1/6 chance
+            if obs_event:
+                subject, target = random.sample(self.people, 2)
+                # Use these to align them
+                new_loc = random.choice(self.locations)
+                #print(f'--{new_loc}--')
+                alignment_events, current_locations = self.align_for_event([subject, target], new_loc, current_locations)
+                new_event, current_locations = self.observation_event(subject, target, new_loc, current_locations)
+                sequences += alignment_events + new_event
+            else:
+                person = random.choice(self.people)
+                # cur_loc = current_locations[person]
+                loc = random.choice(self.possible_moves[person])
+                current_locations = self.update_state(person, loc, current_locations)
+                sequences += f"{self.relation}({person}, {loc}, {t})\n"
         return sequences, current_locations
         
 
