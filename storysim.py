@@ -49,7 +49,11 @@ class StorySimulator:
         """Creates a fully connected graph from locations."""
         return {loc: [l for l in self.locations if l != loc] for loc in self.locations}
 
-    def update_state(self, subject, new_loc, current_locations):
+    def update_state(self, subject, new_loc, current_locations, time_step = None):
+        if time_step:
+            current_locations[person][time_step] = new_loc
+            # possible_moves?
+            return current_locations
         for person in self.people:
             if person == subject:
                 current_locations[person].append(new_loc)
@@ -57,6 +61,22 @@ class StorySimulator:
             else:
                 current_locations[person].append(current_locations[person][-1])
         return current_locations
+
+    def generate_pre_event(self, actor, target_location, current_locations, time_step):
+        """Generates the event required to move an actor to the target location."""
+        start_location = current_locations[actor][-1]
+        if target_location in self.graph[start_location]:
+            # Overwrite the generated event with the intermediate one
+            current_locations = self.update_state(actor, target_location, current_locations, time_step)
+            return f"1{self.relation}({actor}, {target_location}, {time_step})\n", current_locations
+        else:
+            # Choose an intermediate location
+            intermediate = random.choice(self.graph[start_location])
+            # Overwrite the generated event with the intermediate one
+            current_locations = self.update_state(actor, intermediate, current_locations)
+            pre_event = f"{self.relation}({actor}, {intermediate}, {time_step})\n"
+            final_event, current_locations = self.generate_pre_event(actor, target_location, current_locations, time_step + 1)
+            return pre_event + final_event, current_locations
 
     def observation_event(self, subject, target, location, current_locations):
         new = random.choice(self.graph[location])
@@ -123,9 +143,18 @@ class StorySimulator:
                 obs_event_details = self.obs_steps[t]  # Dict with keys: "actors" and "location"
                 subject, target = obs_event_details["actors"]
                 new_loc = obs_event_details["location"]
-                max_steps = steps - self.time_step
 
-                if self.can_align_for_event([subject, target], new_loc, current_locations, max_steps):
+                # Generate pre-events to align actors to the observation location
+                pre_event_subject, current_locations = self.generate_pre_event(subject, new_loc, current_locations, self.time_step)
+                self.time_step += pre_event_subject.count("\n")  # Increment time step by the number of pre-events
+
+                pre_event_target, current_locations = self.generate_pre_event(target, new_loc, current_locations, self.time_step)
+                self.time_step += pre_event_target.count("\n")
+
+                sequences += pre_event_subject + pre_event_target
+
+                # Generate the observation event
+                if self.can_align_for_event([subject, target], new_loc, current_locations, steps - self.time_step):
                     alignment_events, current_locations = self.align_for_event([subject, target], new_loc, current_locations)
                     new_event, current_locations = self.observation_event(subject, target, new_loc, current_locations)
                     sequences += alignment_events + new_event
