@@ -26,6 +26,7 @@ class StorySimulator:
         random.seed(self.seed)
         self.params = params
         self.initial_prompt = f"Read the following story and answer the question at the end. Note that all characters start in the {self.locations[-1]}."
+        self.sequences = []
         #self.client = OpenAI()
         
         # Data storage
@@ -49,10 +50,9 @@ class StorySimulator:
         """Creates a fully connected graph from locations."""
         return {loc: [l for l in self.locations if l != loc] for loc in self.locations}
 
-    def update_state(self, subject, new_loc, current_locations, time_step = None):
-        if time_step:
-            current_locations[person][time_step] = new_loc
-            # possible_moves?
+    def update_state(self, subject, new_loc, current_locations, t=None):
+        if t is not None and t != self.time_step:
+            current_locations[subject][t] = new_loc
             return current_locations
         for person in self.people:
             if person == subject:
@@ -62,115 +62,96 @@ class StorySimulator:
                 current_locations[person].append(current_locations[person][-1])
         return current_locations
 
-    def generate_pre_event(self, actor, target_location, current_locations, time_step):
-        """Generates the event required to move an actor to the target location."""
-        start_location = current_locations[actor][-1]
-        if target_location in self.graph[start_location]:
-            # Overwrite the generated event with the intermediate one
-            current_locations = self.update_state(actor, target_location, current_locations, time_step)
-            return f"1{self.relation}({actor}, {target_location}, {time_step})\n", current_locations
-        else:
-            # Choose an intermediate location
-            intermediate = random.choice(self.graph[start_location])
-            # Overwrite the generated event with the intermediate one
-            current_locations = self.update_state(actor, intermediate, current_locations)
-            pre_event = f"{self.relation}({actor}, {intermediate}, {time_step})\n"
-            final_event, current_locations = self.generate_pre_event(actor, target_location, current_locations, time_step + 1)
-            return pre_event + final_event, current_locations
-
-    def observation_event(self, subject, target, location, current_locations):
-        new = random.choice(self.graph[location])
-        event_string = f"""*{self.relation}({subject}, {location}, {self.time_step})
-        *{self.relation}({target}, {location}, {self.time_step+1})
-        *{self.relation}({subject}, {new}, {self.time_step+2})
-        ---
-        """
-        self.time_step += 3
-        current_locations = self.update_state(subject, location, current_locations)
-        current_locations = self.update_state(target, location, current_locations)
-        current_locations = self.update_state(subject, new, current_locations)
-        return event_string, current_locations
-
-    def align_for_event(self, actors, location, current_locations):
-        events = ''
-        for actor in actors:
-            done = False
-            while not done:
-                possible = self.possible_moves[actor]
-                if location not in possible:
-                    new_loc = random.choice(possible)
-                    current_locations = self.update_state(actor, new_loc, current_locations)
-                    events += f"#{self.relation}({actor}, {new_loc}, {self.time_step})\n"
-                    self.time_step += 1
-                else:
-                    done = True
-        return events, current_locations
-
-    def can_align_for_event(self, actors, location, current_locations, max_steps):
-        """Checks if alignment is possible for the given actors and location within a time constraint using BFS."""
-        def bfs(start, target, max_depth):
+    def find_shortest_path(self, start, target):
+            """Uses BFS to find the shortest path and its length from start to target."""
             visited = set()
-            queue = [(start, 0)]  # (current_location, current_depth)
+            queue = [(start, 0, [])]  # (current_location, depth, path)
 
             while queue:
-                current, depth = queue.pop(0)
-
-                if depth > max_depth:
-                    continue
+                current, depth, path = queue.pop(0)
 
                 if current == target:
-                    return True
+                    return depth, path + [current]
 
                 if current not in visited:
                     visited.add(current)
-                    queue.extend((neighbor, depth + 1) for neighbor in self.graph[current])
+                    queue.extend((neighbor, depth + 1, path + [current]) for neighbor in self.graph[current])
 
-            return False
+            return float('inf'), []  # No path found
 
+
+    def validate_observation_events(self):
+        """Checks if all observation events are feasible given the graph."""
+        for t, details in self.obs_steps.items():
+            location = details["location"]
+            max_steps = t
+
+            for person in details["actors"]:
+                path_length, _ = self.find_shortest_path(self.locations[-1], location)
+                if 2* path_length >= max_steps:
+                    raise ValueError(f"Observation event at time {t} with location {location} is not possible. Path length is {path_length}, but only {max_steps} steps are available.")
+
+    def observation_event(self, subject, target, location, current_locations):
+        new = random.choice(self.graph[location])
+        current_locations = self.update_state(subject, location, current_locations)
+        self.sequences.append(f"*{self.relation}({subject}, {location}, {self.time_step})\n")
+        current_locations = self.update_state(target, location, current_locations)
+        self.sequences.append(f"*{self.relation}({target}, {location}, {self.time_step+1})\n")
+        current_locations = self.update_state(subject, new, current_locations)
+        self.sequences.append(f"*{self.relation}({subject}, {new}, {self.time_step+2})\n")
+        self.time_step += 3
+        return current_locations
+
+    def align_actors_to_location(self, actors, location, current_locations):
+        """Aligns actors to the target location based on shortest paths. Assume we're starting from 0"""
+        events = ""
+        aligned_actions = {a:[] for a in actors}
         for actor in actors:
-            start_location = current_locations[actor][-1]
-            if not bfs(start_location, location, max_steps):
-                return False
-        return True
+            steps, path = self.find_shortest_path(current_locations[actor][0], location)
+            if steps == float('inf'):
+                raise ValueError(f"No path exists to align actor {actor} to location {location}.")
+            aligned_actions[actor] = path
+        # Randomly pick between two actors to build the aligned path
+        count = 0
+        actors_list = actors
+        while(sum([len(aligned_actions[a]) for a in aligned_actions]) != 0):
+            actor_choice = random.choice(actors_list)
+            actor_step = aligned_actions[actor_choice].pop(0)
+            if len(aligned_actions[actor_choice]) == 0:
+                actors_list.remove(actor_choice)
+            self.sequences[count] = (f"@{self.relation}({actor_choice}, {actor_step}, {count})\n")
+            current_locations = self.update_state(actor_choice, actor_step, current_locations, t=count)
+            count += 1
+        return events, current_locations
 
     def run_simulation(self, steps):
+        # Validate observation events - check if it's possible to reach the locations from the start
+        self.validate_observation_events()
+
         current_locations = {person: [self.locations[-1]] for person in self.people}
-        sequences = ""
         
-        for t in range(steps):
-            if t in self.obs_steps:
-                # User-specified observation event details
-                obs_event_details = self.obs_steps[t]  # Dict with keys: "actors" and "location"
+        # TODO: Make conditional on self.time_step
+        while(self.time_step <= steps):
+            if self.time_step in self.obs_steps:
+                obs_event_details = self.obs_steps[self.time_step]  # Dict with keys: "actors" and "location"
                 subject, target = obs_event_details["actors"]
-                new_loc = obs_event_details["location"]
-
-                # Generate pre-events to align actors to the observation location
-                pre_event_subject, current_locations = self.generate_pre_event(subject, new_loc, current_locations, self.time_step)
-                self.time_step += pre_event_subject.count("\n")  # Increment time step by the number of pre-events
-
-                pre_event_target, current_locations = self.generate_pre_event(target, new_loc, current_locations, self.time_step)
-                self.time_step += pre_event_target.count("\n")
-
-                sequences += pre_event_subject + pre_event_target
-
+                location = obs_event_details["location"]
+                # Align actors to the location
+                alignment_events, current_locations = self.align_actors_to_location([subject, target], location, current_locations)
+                # sequences += alignment_events
                 # Generate the observation event
-                if self.can_align_for_event([subject, target], new_loc, current_locations, steps - self.time_step):
-                    alignment_events, current_locations = self.align_for_event([subject, target], new_loc, current_locations)
-                    new_event, current_locations = self.observation_event(subject, target, new_loc, current_locations)
-                    sequences += alignment_events + new_event
-                else:
-                    sequences += f"# Observation event at time {t} could not occur due to alignment issues.\n"
+                current_locations = self.observation_event(subject, target, location, current_locations)
             else:
                 person = random.choice(self.people)
                 loc = random.choice(self.possible_moves[person])
                 current_locations = self.update_state(person, loc, current_locations)
-                sequences += f"{self.relation}({person}, {loc}, {self.time_step})\n"
+                self.sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
                 self.time_step += 1
-        return sequences, current_locations
 
+        return current_locations
 
 if __name__ == '__main__':
-    # TODO: Add support for JSON
+    # Define the graph and observation events
     graph = {
         "hole_1": ["hole_2", "field"],
         "hole_2": ["hole_1", "hole_3"],
@@ -180,8 +161,7 @@ if __name__ == '__main__':
     }
 
     obs_steps = {
-        3: {"actors": ["Alice", "Bob"], "location": "hole_2"},
-        7: {"actors": ["Alice", "Bob"], "location": "field"}
+        7: {"actors": ["Alice", "Bob"], "location": "hole_2"},
     }
 
     sim = StorySimulator(
@@ -197,4 +177,5 @@ if __name__ == '__main__':
         obs_steps=obs_steps
     )
 
-    print(sim.run_simulation(10)[0])
+    sim.run_simulation(10)
+    print("".join(sim.sequences))
