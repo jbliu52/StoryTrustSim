@@ -8,8 +8,19 @@ import regex as re
 import pandas as pd
 from scipy import stats
 
+
+'''
+Storyboard - a set of events that are required to happen. An outline of the story.
+
+constraints = [cross(Alice, Bob, 5, hole_4)]
+cross(X,Y) -> Path for X to hole_4 steps interleaved with Y to hole_4
+-> Figure out number of steps it takes, then do shuffle on that
+
+
+'''
+
 class StorySimulator:
-    def __init__(self, people, locations, relation, models, num_trials, length_threshold, trial_seed, params, graph=None, obs_steps=None):
+    def __init__(self, people, locations, relation, models, num_trials, length_threshold, trial_seed, params, graph=None, obs_steps=None, storyboard=None):
         from collections import defaultdict
         # load_dotenv()
         # self.api_key = os.getenv('OPENAI_KEY')
@@ -27,6 +38,7 @@ class StorySimulator:
         self.params = params
         self.initial_prompt = f"Read the following story and answer the question at the end. Note that all characters start in the {self.locations[-1]}."
         self.sequences = []
+        self.storyboard = storyboard
         #self.client = OpenAI()
         
         # Data storage
@@ -90,6 +102,8 @@ class StorySimulator:
                 path_length, _ = self.find_shortest_path(self.locations[-1], location)
                 if 2* path_length >= max_steps:
                     raise ValueError(f"Observation event at time {t} with location {location} is not possible. Path length is {path_length}, but only {max_steps} steps are available.")
+                else:
+                    return path_length
 
     def observation_event(self, subject, target, location, current_locations):
         new = random.choice(self.graph[location])
@@ -124,31 +138,78 @@ class StorySimulator:
             count += 1
         return events, current_locations
 
+    '''
+    TODO: I think this could all be redone with shuffling the same array and keeping track of the indices
+    
+    K = Begin with array of 0's of length steps
+    
+    left = 0, right = inf
+    for each obs_event
+        right = t
+        pt = path length
+        left to  left+pt of K is 1, from left+pt to left+2pt is 2
+        shuffle
+        left = left + 2pt
+    
+    use K to generate sequence
+    '''
     def run_simulation(self, steps):
-        # Validate observation events - check if it's possible to reach the locations from the start
-        self.validate_observation_events()
-
         current_locations = {person: [self.locations[-1]] for person in self.people}
-        
-        # TODO: Make conditional on self.time_step
-        while(self.time_step <= steps):
-            if self.time_step in self.obs_steps:
-                obs_event_details = self.obs_steps[self.time_step]  # Dict with keys: "actors" and "location"
-                subject, target = obs_event_details["actors"]
-                location = obs_event_details["location"]
-                # Align actors to the location
-                alignment_events, current_locations = self.align_actors_to_location([subject, target], location, current_locations)
-                # sequences += alignment_events
-                # Generate the observation event
-                current_locations = self.observation_event(subject, target, location, current_locations)
-            else:
-                person = random.choice(self.people)
-                loc = random.choice(self.possible_moves[person])
-                current_locations = self.update_state(person, loc, current_locations)
-                self.sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
-                self.time_step += 1
+        # Validate observation events - check if it's possible to reach the locations from the start
 
-        return current_locations
+        knuth = [0] * steps
+        
+        left = 0
+        required_events = {}
+        for t in self.obs_steps:
+            path_length, path = self.find_shortest_path(self.locations[-1], self.obs_steps[t]['location'])
+            
+            path = path[1:]
+            knuth[left:left+path_length] = [1] * path_length
+            knuth[left+path_length:left+2*path_length] = [2] * path_length
+            required_events[t] = (self.obs_steps[t]['actors'], path)
+            x = [a for a in knuth[left:left+2*path_length]]
+            random.shuffle(x)
+            knuth[left:left+2*path_length] = x  
+            left = t
+            knuth[t], knuth[t+1] = 100, 101
+            # Generation step
+            p1 = 0
+            p2 = 0
+            sequences = []
+            print(knuth)
+            for i in knuth:
+                if i == 1:
+                    sequences.append(f"{self.relation}({self.obs_steps[t]['actors'][0]}, {path[p1]}, {self.time_step})\n")
+                    current_locations = self.update_state(self.obs_steps[t]['actors'][0], path[p1], current_locations)
+                    self.time_step += 1
+                    p1 += 1
+                elif i == 2:
+                    sequences.append(f"{self.relation}({self.obs_steps[t]['actors'][1]}, {path[p2]}, {self.time_step})\n")
+                    current_locations = self.update_state(self.obs_steps[t]['actors'][1], path[p2], current_locations)
+                    self.time_step += 1
+                    p2 += 1
+                elif i == 100:
+                    new_loc = random.choice([l for l in self.possible_moves[self.obs_steps[t]['actors'][1]] if l !=self.obs_steps[t]['location']])
+                    sequences.append(f"{self.relation}({self.obs_steps[t]['actors'][1]}, {new_loc}, {self.time_step})\n")
+                    current_locations = self.update_state(self.obs_steps[t]['actors'][1], new_loc, current_locations)
+                    self.time_step += 1
+                else:
+                    choices = []
+                    if self.time_step <= t+1: 
+                        choices = [p for p in self.people if p != self.obs_steps[t]['actors'][0] and p != self.obs_steps[t]['actors'][1]]
+                    else:
+                        choices = self.people
+                    person = random.choice(choices)
+                    loc = random.choice(self.possible_moves[person])
+                    sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
+                    current_locations = self.update_state(person, loc, current_locations)
+                    self.time_step += 1
+
+                
+        print('\n'.join(sequences))  
+
+        return None
 
 if __name__ == '__main__':
     # Define the graph and observation events
@@ -165,7 +226,7 @@ if __name__ == '__main__':
     }
 
     sim = StorySimulator(
-        people=["Alice", "Bob"],
+        people=["Alice", "Bob", "Charlie"],
         locations=["hole_1", "hole_2", "hole_3", "hole_4", "field"],
         relation="jumps_in",
         models=["gpt-4"],
@@ -177,5 +238,4 @@ if __name__ == '__main__':
         obs_steps=obs_steps
     )
 
-    sim.run_simulation(10)
-    print("".join(sim.sequences))
+    sim.run_simulation(15)
