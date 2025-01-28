@@ -139,19 +139,7 @@ class StorySimulator:
         return events, current_locations
 
     '''
-    TODO: I think this could all be redone with shuffling the same array and keeping track of the indices
-    
-    K = Begin with array of 0's of length steps
-    
-    left = 0, right = inf
-    for each obs_event
-        right = t
-        pt = path length
-        left to  left+pt of K is 1, from left+pt to left+2pt is 2
-        shuffle
-        left = left + 2pt
-    
-    use K to generate sequence
+    TODO: Try with multiple events
     '''
     def run_simulation(self, steps):
         current_locations = {person: [self.locations[-1]] for person in self.people}
@@ -163,22 +151,22 @@ class StorySimulator:
         required_events = {}
         for t in self.obs_steps:
             path_length, path = self.find_shortest_path(self.locations[-1], self.obs_steps[t]['location'])
-            
+            right = left + 2*path_length
             path = path[1:]
             knuth[left:left+path_length] = [1] * path_length
-            knuth[left+path_length:left+2*path_length] = [2] * path_length
+            knuth[left+path_length:right] = [2] * path_length
             required_events[t] = (self.obs_steps[t]['actors'], path)
-            x = [a for a in knuth[left:left+2*path_length]]
+            x = [a for a in knuth[left:t]]
             random.shuffle(x)
-            knuth[left:left+2*path_length] = x  
-            left = t
+            knuth[left:t] = x  
+            
             knuth[t], knuth[t+1] = 100, 101
             # Generation step
             p1 = 0
             p2 = 0
             sequences = []
             print(knuth)
-            for i in knuth:
+            for i in knuth[left:t]:
                 if i == 1:
                     sequences.append(f"{self.relation}({self.obs_steps[t]['actors'][0]}, {path[p1]}, {self.time_step})\n")
                     current_locations = self.update_state(self.obs_steps[t]['actors'][0], path[p1], current_locations)
@@ -195,21 +183,24 @@ class StorySimulator:
                     current_locations = self.update_state(self.obs_steps[t]['actors'][1], new_loc, current_locations)
                     self.time_step += 1
                 else:
-                    choices = []
-                    if self.time_step <= t+1: 
-                        choices = [p for p in self.people if p != self.obs_steps[t]['actors'][0] and p != self.obs_steps[t]['actors'][1]]
-                    else:
-                        choices = self.people
+                    choices = [p for p in self.people if p != self.obs_steps[t]['actors'][0] and p != self.obs_steps[t]['actors'][1]]
                     person = random.choice(choices)
                     loc = random.choice(self.possible_moves[person])
                     sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
                     current_locations = self.update_state(person, loc, current_locations)
                     self.time_step += 1
-
-                
+            # After
+            left = t
+        if left != steps:
+            for _ in knuth[left:]:
+                person = random.choice(self.people)
+                loc = random.choice(self.possible_moves[person])
+                sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
+                current_locations = self.update_state(person, loc, current_locations)
+                self.time_step += 1
         print('\n'.join(sequences))  
 
-        return None
+        return sequences
 
 if __name__ == '__main__':
     # Define the graph and observation events
@@ -223,10 +214,11 @@ if __name__ == '__main__':
 
     obs_steps = {
         7: {"actors": ["Alice", "Bob"], "location": "hole_2"},
+        14: {"actors": ["Charlie", "Danny"], "location": "hole_4"},
     }
 
     sim = StorySimulator(
-        people=["Alice", "Bob", "Charlie"],
+        people=["Alice", "Bob", "Charlie", "Danny"],
         locations=["hole_1", "hole_2", "hole_3", "hole_4", "field"],
         relation="jumps_in",
         models=["gpt-4"],
@@ -238,4 +230,4 @@ if __name__ == '__main__':
         obs_steps=obs_steps
     )
 
-    sim.run_simulation(15)
+    sim.run_simulation(30)
