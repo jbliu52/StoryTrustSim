@@ -56,7 +56,7 @@ class StorySimulator:
         # Simulation time step
         self.time_step = 0
         # Observation steps
-        self.obs_steps = obs_steps if obs_steps else []
+        self.obs_steps = obs_steps if obs_steps else dict()
 
     def _create_fully_connected_graph(self):
         """Creates a fully connected graph from locations."""
@@ -148,58 +148,87 @@ class StorySimulator:
         knuth = [0] * steps
         
         left = 0
+        
+        # Storing the path for all the required events
         required_events = {}
+        
         for t in self.obs_steps:
-            path_length, path = self.find_shortest_path(self.locations[-1], self.obs_steps[t]['location'])
-            right = left + 2*path_length
-            path = path[1:]
-            knuth[left:left+path_length] = [1] * path_length
-            knuth[left+path_length:right] = [2] * path_length
-            required_events[t] = (self.obs_steps[t]['actors'], path)
+            # The two people involved in the event
+            person_1 = self.obs_steps[t]['actors'][0]
+            person_2 = self.obs_steps[t]['actors'][1]
+            
+            # The paths from wherever the two people are to where they'll cross paths
+            path_length_1, path_1 = self.find_shortest_path(current_locations[person_1][-1], self.obs_steps[t]['location'])
+            path_length_2, path_2 = self.find_shortest_path(current_locations[person_2][-1], self.obs_steps[t]['location'])
+            
+            # Edge of the event in the knuth array
+            right = left + path_length_1+ path_length_2
+            
+            # Truncate the current location of both people, since we only need their next steps
+            path_1 = path_1[1:]
+            path_2 = path_2[1:]
+            
+            # 1 corresponds to person 1, 2 corresponds to person 2
+            knuth[left:left+path_length_1] = [1] * path_length_1
+            knuth[left+path_length_1:right] = [2] * path_length_2
+            
+            # Shuffle 
+            required_events[t] = (path_1,  path_2)
             x = [a for a in knuth[left:t]]
             random.shuffle(x)
             knuth[left:t] = x  
-            
-            knuth[t], knuth[t+1] = 100, 101
-            # Generation step
-            p1 = 0
-            p2 = 0
-            sequences = []
-            print(knuth)
-            for i in knuth[left:t]:
-                if i == 1:
-                    sequences.append(f"{self.relation}({self.obs_steps[t]['actors'][0]}, {path[p1]}, {self.time_step})\n")
-                    current_locations = self.update_state(self.obs_steps[t]['actors'][0], path[p1], current_locations)
-                    self.time_step += 1
-                    p1 += 1
-                elif i == 2:
-                    sequences.append(f"{self.relation}({self.obs_steps[t]['actors'][1]}, {path[p2]}, {self.time_step})\n")
-                    current_locations = self.update_state(self.obs_steps[t]['actors'][1], path[p2], current_locations)
-                    self.time_step += 1
-                    p2 += 1
-                elif i == 100:
-                    new_loc = random.choice([l for l in self.possible_moves[self.obs_steps[t]['actors'][1]] if l !=self.obs_steps[t]['location']])
-                    sequences.append(f"{self.relation}({self.obs_steps[t]['actors'][1]}, {new_loc}, {self.time_step})\n")
-                    current_locations = self.update_state(self.obs_steps[t]['actors'][1], new_loc, current_locations)
-                    self.time_step += 1
-                else:
-                    choices = [p for p in self.people if p != self.obs_steps[t]['actors'][0] and p != self.obs_steps[t]['actors'][1]]
-                    person = random.choice(choices)
-                    loc = random.choice(self.possible_moves[person])
-                    sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
-                    current_locations = self.update_state(person, loc, current_locations)
-                    self.time_step += 1
-            # After
-            left = t
-        if left != steps:
-            for _ in knuth[left:]:
-                person = random.choice(self.people)
+            # 100 corresponds to where one of the people moves, but the other knows where they are
+            knuth[t] = 100
+            knuth[t+1] = 101
+            left = t+2
+        # 100 denotes the end of one observation event
+        # Generation step
+        sequences = []
+        p1, p2 = 0, 0
+        event_list = iter(sorted(self.obs_steps.keys()))
+        next_event = next(event_list)        
+        p1_path, p2_path = required_events[next_event][0], required_events[next_event][1] 
+        for i in knuth:
+            person_1 = self.obs_steps[next_event]['actors'][0]
+            person_2 = self.obs_steps[next_event]['actors'][1]
+            if i == 1:
+                sequences.append(f"{self.relation}({person_1}, {p1_path[p1]}, {self.time_step})\n")
+                current_locations = self.update_state(person_1, p1_path[p1], current_locations)
+                self.time_step += 1
+                p1 += 1
+            elif i == 2:
+                sequences.append(f"{self.relation}({person_2}, {p2_path[p2]}, {self.time_step})\n")
+                current_locations = self.update_state(person_2, p2_path[p2], current_locations)
+                self.time_step += 1
+                p2 += 1
+            elif i == 100:
+                # Move person 2, but person 1 knows
+                new_loc = random.choice([l for l in self.possible_moves[person_2] if l !=self.obs_steps[next_event]['location']])
+                sequences.append(f"{self.relation}({person_2}, {new_loc}, {self.time_step})\n")
+                current_locations = self.update_state(person_2, new_loc, current_locations)
+                self.time_step += 1
+            elif i == 101:
+                # Mislead person 1
+                new_loc = random.choice([l for l in self.possible_moves[person_2] if l != current_locations[person_1][-1]])
+                sequences.append(f"{self.relation}({person_2}, {new_loc}, {self.time_step})\n")
+                current_locations = self.update_state(person_2, new_loc, current_locations)
+                self.time_step += 1
+                try:
+                    next_event = next(event_list)
+                except:
+                    # This means we're done
+                    continue
+                p1, p2 = 0, 0
+                p1_path, p2_path = required_events[next_event][0], required_events[next_event][1]
+                
+            else:
+                choices = [p for p in self.people if p != person_1 and p != person_2]
+                person = random.choice(choices)
                 loc = random.choice(self.possible_moves[person])
                 sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
                 current_locations = self.update_state(person, loc, current_locations)
                 self.time_step += 1
-        print('\n'.join(sequences))  
-
+        print(knuth)
         return sequences
 
 if __name__ == '__main__':
@@ -214,8 +243,9 @@ if __name__ == '__main__':
 
     obs_steps = {
         7: {"actors": ["Alice", "Bob"], "location": "hole_2"},
-        14: {"actors": ["Charlie", "Danny"], "location": "hole_4"},
+        14: {"actors": ["Danny", "Charlie"], "location": "hole_4"}
     }
+    
 
     sim = StorySimulator(
         people=["Alice", "Bob", "Charlie", "Danny"],
@@ -230,4 +260,4 @@ if __name__ == '__main__':
         obs_steps=obs_steps
     )
 
-    sim.run_simulation(30)
+    print("".join(sim.run_simulation(30)))
