@@ -25,7 +25,8 @@ class StorySimulator:
         # load_dotenv()
         # self.api_key = os.getenv('OPENAI_KEY')
         # os.environ['OPENAI_API_KEY'] = self.api_key
-        
+
+
         # Experiment constants
         self.people = people
         self.locations = locations
@@ -105,16 +106,6 @@ class StorySimulator:
                 else:
                     return path_length
 
-    def observation_event(self, subject, target, location, current_locations):
-        new = random.choice(self.graph[location])
-        current_locations = self.update_state(subject, location, current_locations)
-        self.sequences.append(f"*{self.relation}({subject}, {location}, {self.time_step})\n")
-        current_locations = self.update_state(target, location, current_locations)
-        self.sequences.append(f"*{self.relation}({target}, {location}, {self.time_step+1})\n")
-        current_locations = self.update_state(subject, new, current_locations)
-        self.sequences.append(f"*{self.relation}({subject}, {new}, {self.time_step+2})\n")
-        self.time_step += 3
-        return current_locations
 
     def align_actors_to_location(self, actors, location, current_locations):
         """Aligns actors to the target location based on shortest paths. Assume we're starting from 0"""
@@ -181,6 +172,7 @@ class StorySimulator:
             knuth[t] = 100
             knuth[t+1] = 101
             left = t+2
+        
         # 100 denotes the end of one observation event
         # Generation step
         sequences = []
@@ -208,10 +200,21 @@ class StorySimulator:
                 current_locations = self.update_state(person_2, new_loc, current_locations)
                 self.time_step += 1
             elif i == 101:
-                # Mislead person 1
-                new_loc = random.choice([l for l in self.possible_moves[person_2] if l != current_locations[person_1][-1]])
-                sequences.append(f"{self.relation}({person_2}, {new_loc}, {self.time_step})\n")
-                current_locations = self.update_state(person_2, new_loc, current_locations)
+                choices = []
+                poi = person_2
+                if self.obs_steps[next_event]['mislead']:
+                    # Mislead person 1
+                    choices = [l for l in self.possible_moves[person_2] if l != current_locations[person_1][-1]]
+                else:
+                    # Don't mislead person 1
+                    x = [p for p in self.people if (p != person_1 and p != person_2) or len(self.people) <= 2]
+                    print(x)
+                    poi = random.choice(x)
+                    print(poi)
+                    choices = self.possible_moves[poi]
+                new_loc = random.choice(choices)
+                sequences.append(f"{self.relation}({poi}, {new_loc}, {self.time_step})\n")
+                current_locations = self.update_state(poi, new_loc, current_locations)
                 self.time_step += 1
                 try:
                     next_event = next(event_list)
@@ -220,7 +223,6 @@ class StorySimulator:
                     continue
                 p1, p2 = 0, 0
                 p1_path, p2_path = required_events[next_event][0], required_events[next_event][1]
-                
             else:
                 choices = [p for p in self.people if p != person_1 and p != person_2]
                 person = random.choice(choices)
@@ -242,8 +244,8 @@ if __name__ == '__main__':
     }
 
     obs_steps = {
-        7: {"actors": ["Alice", "Bob"], "location": "hole_2"},
-        14: {"actors": ["Danny", "Charlie"], "location": "hole_4"}
+        7: {"actors": ["Alice", "Bob"], "location": "hole_2", "mislead": True},
+        14: {"actors": ["Danny", "Charlie"], "location": "hole_4", "mislead": False}
     }
     
 
