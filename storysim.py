@@ -20,7 +20,7 @@ cross(X,Y) -> Path for X to hole_4 steps interleaved with Y to hole_4
 '''
 
 class StorySimulator:
-    def __init__(self, people, locations, relation, models, num_trials, length_threshold, trial_seed, params, graph=None, events=None, storyboard=None):
+    def __init__(self, people, locations, relation, trial_seed, params, graph=None, events=None, storyboard=None):
         from collections import defaultdict
         # load_dotenv()
         # self.api_key = os.getenv('OPENAI_KEY')
@@ -31,23 +31,13 @@ class StorySimulator:
         self.people = people
         self.locations = locations
         self.relation = relation
-        self.models = models
-        self.num_trials = num_trials
-        self.length_threshold = length_threshold
         self.seed = trial_seed
         random.seed(self.seed)
         self.params = params
-        self.initial_prompt = f"Read the following story and answer the question at the end. Note that all characters start in the {self.locations[-1]}."
+        # self.initial_prompt = f"Read the following story and answer the question at the end. Note that all characters start in the {self.locations[-1]}."
         self.sequences = []
         self.storyboard = storyboard
         #self.client = OpenAI()
-        
-        # Data storage
-        self.accuracies = {m: [] for m in models}
-        d = {m: [] for m in self.models}
-        d['Prompt'] = []
-        d['Label'] = []
-        self.results_df = pd.DataFrame(d)
         
         self.state = dict()
         # Adjacency graph for locations
@@ -92,138 +82,78 @@ class StorySimulator:
 
             return float('inf'), []  # No path found
 
-
-    def validate_observation_events(self):
-        """Checks if all observation events are feasible given the graph."""
-        for t, details in self.events.items():
-            location = details["location"]
-            max_steps = t
-
-            for person in details["actors"]:
-                path_length, _ = self.find_shortest_path(self.locations[-1], location)
-                if 2* path_length >= max_steps:
-                    raise ValueError(f"Observation event at time {t} with location {location} is not possible. Path length is {path_length}, but only {max_steps} steps are available.")
-                else:
-                    return path_length
-
-
-    def align_actors_to_location(self, actors, location, current_locations):
-        """Aligns actors to the target location based on shortest paths. Assume we're starting from 0"""
-        events = ""
-        aligned_actions = {a:[] for a in actors}
-        for actor in actors:
-            steps, path = self.find_shortest_path(current_locations[actor][0], location)
-            if steps == float('inf'):
-                raise ValueError(f"No path exists to align actor {actor} to location {location}.")
-            aligned_actions[actor] = path
-        # Randomly pick between two actors to build the aligned path
-        count = 0
-        actors_list = actors
-        while(sum([len(aligned_actions[a]) for a in aligned_actions]) != 0):
-            actor_choice = random.choice(actors_list)
-            actor_step = aligned_actions[actor_choice].pop(0)
-            if len(aligned_actions[actor_choice]) == 0:
-                actors_list.remove(actor_choice)
-            self.sequences[count] = (f"@{self.relation}({actor_choice}, {actor_step}, {count})\n")
-            current_locations = self.update_state(actor_choice, actor_step, current_locations, t=count)
-            count += 1
-        return events, current_locations
-
-    '''
-    TODO: Try with multiple events
-    '''
+  
     def run_simulation(self, steps):
+        # Initialize
         current_locations = {person: [self.locations[-1]] for person in self.people}
-        # Validate observation events - check if it's possible to reach the locations from the start
-
-
         knuth = [0] * steps
-        
-        left = 0
-        
+        left, start = 0, 0
         # Storing the path for all the required events
         required_events = {}
         
+        # Planning phase
         for t in self.events:
             ev = self.events[t]         
             if ev['name'] == 'cross_paths':
-                # The two people involved in the event
-                person_1 = ev['actors'][0]
-                person_2 = ev['actors'][1]
-                
-                # The paths from wherever the two people are to where they'll cross paths
-                path_length_1, path_1 = self.find_shortest_path(current_locations[person_1][-1], ev['location'])
-                path_length_2, path_2 = self.find_shortest_path(current_locations[person_2][-1], ev['location'])
-                
-                # Edge of the event in the knuth array
-                right = left + path_length_1+ path_length_2
-                
-                # Truncate the current location of both people, since we only need their next steps
-                path_1 = path_1[1:]
-                path_2 = path_2[1:]
-                
-                # 1 corresponds to person 1, 2 corresponds to person 2
-                knuth[left:left+path_length_1] = [1] * path_length_1
-                knuth[left+path_length_1:right-1] = [2] * (path_length_2-1)
-                
-                # Shuffle 
-                required_events[t] = (path_1,  path_2)
-                x = [a for a in knuth[left:t]]
+                group = ev['actors']
+                path_info = [self.find_shortest_path(current_locations[p][-1], ev['location']) for p in group]
+                left = start
+                for p_i in range(len(group)):
+                    right = left + path_info[p_i][0]
+                    knuth[left:right] = [p_i+1] * (right - left)
+                    left = right
+                knuth[right-1] = 0
+                required_events[t] = [p[1][1:] for p in path_info]
+                # Shuffle
+                x = [a for a in knuth[start:t]]
                 random.shuffle(x)
-                knuth[left:t] = x  
-                # 100 corresponds to where one of the people moves, but the other knows where they are
-                knuth[t] = 100
-                # knuth[t+1] = 101
-                left = t+1
+                knuth[start:t] = x
+                # Last step is always -100
+                knuth[t] = -100
+                start = t+1
             elif ev["name"] == "exclusive_random":
                 exclude = ev['actors']
                 required_events[t] = (exclude, ev['stop'])
                 knuth[t:ev['stop']] = [-2] * (ev['stop'] - t)
-                left = ev['stop']
+                start = ev['stop']
             elif ev['name'] == 'mislead':
                 required_events[t] = ev['actors']
-                knuth[t] = 101
-                left = t + 1
-        # 100 denotes the end of one observation event
+                knuth[t] = -101
+                start = t + 1
         # Generation step
-        print(knuth)
+        # print(knuth)
+        # Generation phase
         sequences = []
-        p1, p2 = 0, 0
         event_list = iter(sorted(self.events.keys()))
         next_event = next(event_list)        
-        p1_path, p2_path = None, None 
+        paths, indices = None, None
         for i in knuth:
-            # TODO: What if there's a diff number of actors
-            person_1 = self.events[next_event]['actors'][0]
-            person_2 = self.events[next_event]['actors'][1]
-            if i == 1:
-                if p1_path == None:
-                    p1_path, p2_path = required_events[next_event][0], required_events[next_event][1]
-                sequences.append(f"{self.relation}({person_1}, {p1_path[p1]}, {self.time_step})\n")
-                current_locations = self.update_state(person_1, p1_path[p1], current_locations)
-                self.time_step += 1
-                p1 += 1
-            elif i == 2:
-                if p2_path == None:
-                    p1_path, p2_path = required_events[next_event][0], required_events[next_event][1]
-                sequences.append(f"{self.relation}({person_2}, {p2_path[p2]}, {self.time_step})\n")
-                current_locations = self.update_state(person_2, p2_path[p2], current_locations)
-                self.time_step += 1
-                p2 += 1
-            elif i == 100:
+            if i > 0 : # Cross paths
+                if paths == None: 
+                    # Index of a person to make cross paths
+                    paths = required_events[next_event]
+                    indices = [0] * len(paths)
+                actor = self.events[next_event]['actors'][i-1]
+                sequences.append(f"{self.relation}({actor}, {paths[i-1][indices[i-1]]}, {self.time_step})\n")
+                current_locations = self.update_state(actor, paths[i-1][indices[i-1]], current_locations)
+                indices[i-1] += 1
+                self.time_step += 1    
+            elif i == -100:
                 # Move person 2, but person 1 knows
                 new_loc = self.events[next_event]['location']
-                sequences.append(f"{self.relation}({person_2}, {new_loc}, {self.time_step})\n")
-                current_locations = self.update_state(person_2, new_loc, current_locations)
+                actor = self.events[next_event]['actors'][-1]
+                sequences.append(f"{self.relation}({actor}, {new_loc}, {self.time_step})\n")
+                current_locations = self.update_state(actor, new_loc, current_locations)
                 self.time_step += 1
-                p1, p2 = 0, 0
-                p1_path, p2_path = None, None
+                # Reset
+                paths = None
+                indices = None
                 try:
                     next_event = next(event_list)
                 except:
                     # This means we're done
                     continue
-            elif i == 101:
+            elif i == -101:
                 choices = []
                 mislead_person = required_events[t][0]
                 poi = required_events[t][1]
@@ -252,10 +182,10 @@ class StorySimulator:
                         # This means we're done
                         continue
             else:
-                if p1_path == None:
+                if paths == None:
                     choices = self.people
                 else:
-                    choices = [p for p in self.people if p != person_1 and p != person_2]
+                    choices = [p for p in self.people if p not in self.events[next_event]['actors']]
                 person = random.choice(choices)
                 loc = random.choice(self.possible_moves[person])
                 sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
@@ -275,8 +205,8 @@ if __name__ == '__main__':
 
 
     events = {
-        7:{"name": "cross_paths","actors": ["Alice", "Bob"], "location": "hole_2"}, # Between 0 and 7, Bob and Alice will cross paths, with Bob getting there at 7
-        8: {"name": "exclusive_random", "actors":["Alice", "Bob"], "stop": 13 },
+        7:{"name": "cross_paths","actors": ["Alice", "Bob", "Danny"], "location": "hole_2"}, 
+        8: {"name": "exclusive_random", "actors":["Alice", "Bob", "Danny"], "stop": 13 },
         13: {"name": "mislead", "actors":["Alice", "Bob"]}
     }
 
@@ -285,10 +215,7 @@ if __name__ == '__main__':
         people=["Alice", "Bob", "Charlie", "Danny"],
         locations=["hole_1", "hole_2", "hole_3", "hole_4", "field"],
         relation="jumps_in",
-        models=["gpt-4"],
-        num_trials=20,
-        length_threshold=50,
-        trial_seed=20,
+        trial_seed=50,
         params={'prompt': '3', 'type': 'cot'},
         graph=graph,
         events=events
