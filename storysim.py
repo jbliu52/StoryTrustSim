@@ -20,7 +20,7 @@ cross(X,Y) -> Path for X to hole_4 steps interleaved with Y to hole_4
 '''
 
 class StorySimulator:
-    def __init__(self, people, locations, relation, trial_seed, params, graph=None, events=None, storyboard=None):
+    def __init__(self, people, locations, relation, params, trial_seed=None, graph=None, events=None, storyboard=None):
         from collections import defaultdict
         # load_dotenv()
         # self.api_key = os.getenv('OPENAI_KEY')
@@ -32,7 +32,8 @@ class StorySimulator:
         self.locations = locations
         self.relation = relation
         self.seed = trial_seed
-        random.seed(self.seed)
+        if self.seed is not None:
+            random.seed(self.seed)
         self.params = params
         # self.initial_prompt = f"Read the following story and answer the question at the end. Note that all characters start in the {self.locations[-1]}."
         self.sequences = []
@@ -48,22 +49,23 @@ class StorySimulator:
         self.time_step = 0
         # Observation steps
         self.events = events if events else dict()
+        
+        self.current_locations = {person: [self.locations[-1]] for person in self.people}
 
     def _create_fully_connected_graph(self):
         """Creates a fully connected graph from locations."""
         return {loc: [l for l in self.locations if l != loc] for loc in self.locations}
 
-    def update_state(self, subject, new_loc, current_locations, t=None):
+    def update_state(self, subject, new_loc, t=None):
         if t is not None and t != self.time_step:
-            current_locations[subject][t] = new_loc
-            return current_locations
+            self.current_locations[subject][t] = new_loc
         for person in self.people:
             if person == subject:
-                current_locations[person].append(new_loc)
+                self.current_locations[person].append(new_loc)
                 self.possible_moves[person] = self.graph[new_loc]
             else:
-                current_locations[person].append(current_locations[person][-1])
-        return current_locations
+                self.current_locations[person].append(self.current_locations[person][-1])
+        
 
     def find_shortest_path(self, start, target):
             """Uses BFS to find the shortest path and its length from start to target."""
@@ -83,9 +85,10 @@ class StorySimulator:
             return float('inf'), []  # No path found
 
   
+    # TODO: Track question answers
     def run_simulation(self, steps):
         # Initialize
-        current_locations = {person: [self.locations[-1]] for person in self.people}
+        
         knuth = [0] * steps
         left, start = 0, 0
         # Storing the path for all the required events
@@ -96,7 +99,9 @@ class StorySimulator:
             ev = self.events[t]         
             if ev['name'] == 'cross_paths':
                 group = ev['actors']
-                path_info = [self.find_shortest_path(current_locations[p][-1], ev['location']) for p in group]
+                locs = ev['location']
+                # TODO: Fix starting location
+                path_info = [self.find_shortest_path(self.current_locations[p][-1], ev['location']) for p in group]
                 left = start
                 for p_i in range(len(group)):
                     right = left + path_info[p_i][0]
@@ -120,6 +125,9 @@ class StorySimulator:
                 required_events[t] = ev['actors']
                 knuth[t] = -101
                 start = t + 1
+            elif ev['name'] == 'move':
+                required_events[t] = ev['actor']
+                knuth[t] = -102
         # Generation step
         # print(knuth)
         # Generation phase
@@ -135,15 +143,15 @@ class StorySimulator:
                     indices = [0] * len(paths)
                 actor = self.events[next_event]['actors'][i-1]
                 sequences.append(f"{self.relation}({actor}, {paths[i-1][indices[i-1]]}, {self.time_step})\n")
-                current_locations = self.update_state(actor, paths[i-1][indices[i-1]], current_locations)
+                self.update_state(actor, paths[i-1][indices[i-1]])
                 indices[i-1] += 1
                 self.time_step += 1    
             elif i == -100:
-                # Move person 2, but person 1 knows
+                # Move the last person in the actor list to the appropriate spot
                 new_loc = self.events[next_event]['location']
                 actor = self.events[next_event]['actors'][-1]
                 sequences.append(f"{self.relation}({actor}, {new_loc}, {self.time_step})\n")
-                current_locations = self.update_state(actor, new_loc, current_locations)
+                self.update_state(actor, new_loc)
                 self.time_step += 1
                 # Reset
                 paths = None
@@ -155,13 +163,27 @@ class StorySimulator:
                     continue
             elif i == -101:
                 choices = []
-                mislead_person = required_events[t][0]
-                poi = required_events[t][1]
+                mislead_person = required_events[next_event][0]
+                poi = required_events[next_event][1]
                 # Mislead person 1
-                choices = [l for l in self.possible_moves[poi] if l != current_locations[mislead_person][-1]]
+                choices = [l for l in self.possible_moves[poi] if l != self.current_locations[mislead_person][-1]]
                 new_loc = random.choice(choices)
                 sequences.append(f"{self.relation}({poi}, {new_loc}, {self.time_step})\n")
-                current_locations = self.update_state(poi, new_loc, current_locations)
+                self.update_state(poi, new_loc)
+                self.time_step += 1
+                try:
+                    next_event = next(event_list)
+                except:
+                    # This means we're done
+                    continue
+            elif i == -102:
+                # Move person 2, but person 1 knows
+                new_loc = self.events[next_event]['location']
+                if self.events[next_event]['name'] != 'move':
+                    print(self.events[next_event])
+                actor = self.events[next_event]['actor']
+                sequences.append(f"{self.relation}({actor}, {new_loc}, {self.time_step})\n")
+                self.update_state(actor, new_loc)
                 self.time_step += 1
                 try:
                     next_event = next(event_list)
@@ -173,9 +195,9 @@ class StorySimulator:
                 person = random.choice([p for p in self.people if p not in excluded_actors])
                 loc = random.choice(self.possible_moves[person])
                 sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
-                current_locations = self.update_state(person, loc, current_locations)
+                self.update_state(person, loc)
                 self.time_step += 1
-                if self.time_step == required_events[t][1]:
+                if self.time_step == required_events[next_event][1]:
                     try:
                         next_event = next(event_list)
                     except:
@@ -189,36 +211,59 @@ class StorySimulator:
                 person = random.choice(choices)
                 loc = random.choice(self.possible_moves[person])
                 sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
-                current_locations = self.update_state(person, loc, current_locations)
+                self.update_state(person, loc)
                 self.time_step += 1
         return sequences
+    
+    def formal_to_story(self, sequence_list):
+        strings = []
+        for e in sequence_list:
+            e.replace('\n','')
+            e = e.replace(f'{self.relation}(','').replace(')','')
+            subject, loc, time = e.split(',')
+            res = f'{subject} {self.relation.replace("_", " ") if "hole" in loc else self.relation.replace("_", " ").replace("in","out to the") }{loc}'
+            #print(res)
+            strings.append(res)
+        return '. '.join(strings).strip()   
 
 if __name__ == '__main__':
     # Define the graph and observation events
+    possible_people = ["Alice", "Bob", "Charlie", "Danny", "Edward", "Frank", "Georgia"]
+    num_people = 5
+    locations = ["hole_1", "hole_2", "hole_3", "hole_4", "field"]
     graph = {
-        "hole_1": ["hole_2", "field"],
-        "hole_2": ["hole_1", "hole_3"],
-        "hole_3": ["hole_2", "hole_4"],
-        "hole_4": ["hole_3", "field"],
-        "field": ["hole_1", "hole_4"]
-    }
+            "hole_1": ["hole_2", "field"],
+            "hole_2": ["hole_1", "hole_3"],
+            "hole_3": ["hole_2", "hole_4"],
+            "hole_4": ["hole_3", "field"],
+            "field": ["hole_1", "hole_4"]
+        }
+    story_length = 21
+    num_trials = 5
+    mislead_distance = 3
 
+    random.seed(25)
 
-    events = {
-        7:{"name": "cross_paths","actors": ["Alice", "Bob", "Danny"], "location": "hole_2"}, 
-        8: {"name": "exclusive_random", "actors":["Alice", "Bob", "Danny"], "stop": 13 },
-        13: {"name": "mislead", "actors":["Alice", "Bob"]}
-    }
-
-
-    sim = StorySimulator(
-        people=["Alice", "Bob", "Charlie", "Danny"],
-        locations=["hole_1", "hole_2", "hole_3", "hole_4", "field"],
-        relation="jumps_in",
-        trial_seed=50,
-        params={'prompt': '3', 'type': 'cot'},
-        graph=graph,
-        events=events
-    )
-
-    print("".join(sim.run_simulation(15)))
+    for _ in range(num_trials):
+        event_dict = {}
+        poi = random.sample(possible_people[:num_people], 2)
+        loc = random.sample(locations,3)
+        #second_loc = random.choice(graph[loc])
+        event_dict[15] = {"name": "cross_paths","actors": poi, "location": [loc[0], loc[2]]}
+        event_dict[16] = {"name":"move", "actor":poi[-1], "location": loc[2]}
+        event_dict[17] = {"name": "exclusive_random", "actors": poi, "stop": 17 + mislead_distance}
+        event_dict[17 + mislead_distance] = {"name": "mislead", "actors": poi}
+        #event_dict[17 + mislead_distance+1] = {"name": "exclusive_random", "actors": poi, "stop": story_length}
+        sim = StorySimulator(
+            people=possible_people[:num_people],
+            locations=["hole_1", "hole_2", "hole_3", "hole_4", "field"],
+            relation="jumps_in",
+            params={'prompt': '3', 'type': 'cot'},
+            graph=graph,
+            events=event_dict
+        )
+        res = sim.run_simulation(story_length)
+        cp_answer = sim.current_locations[poi[1]][10]
+        story = sim.formal_to_story(res)
+        
+        
