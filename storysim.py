@@ -20,7 +20,7 @@ cross(X,Y) -> Path for X to hole_4 steps interleaved with Y to hole_4
 '''
 
 class StorySimulator:
-    def __init__(self, people, locations, relation, params, trial_seed=None, graph=None, events=None, storyboard=None):
+    def __init__(self, people, locations, relation, params, trial_seed=None, graph=None, events=None, storyboard=None, actions=None):
         from collections import defaultdict
         # load_dotenv()
         # self.api_key = os.getenv('OPENAI_KEY')
@@ -32,6 +32,7 @@ class StorySimulator:
         self.locations = locations
         self.relation = relation
         self.seed = trial_seed
+        self.actions = actions
         if self.seed is not None:
             random.seed(self.seed)
         self.params = params
@@ -116,18 +117,19 @@ class StorySimulator:
         left, start = 0, 0
         # Storing the path for all the required events
         required_events = {}
-        
+        if self.actions:
+            actions = {t: f"{self.actions[t]['actor']} {self.actions[t]['action']}" for t in self.actions}
         # Planning phase
         for t in self.events:
-            ev = self.events[t]         
+            ev = self.events[t]
             if ev['name'] == 'cross_paths':
                 group = ev['actors']
                 locs = ev['location']
-                # TODO: Fix starting location
                 path_info = []
                 for person in group:
                     path_step = []
-                    prev = self.locations[-1]
+                    # Start at hallway? No, start at the place you were before
+                    prev = self.locations[-1] if 'prev' not in ev else ev['prev']
                     for l in locs:
                         if ev['path_type'] == 'unique':
                             pi = self.find_k_unique_paths(self.graph, prev, l, len(group))
@@ -254,19 +256,43 @@ class StorySimulator:
                 loc = random.choice(self.possible_moves[person])
                 sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
                 self.update_state(person, loc)
-                self.time_step += 1 
+                self.time_step += 1
+            if self.actions and self.time_step - 1 in actions:
+                sequences.append(f'*{actions[self.time_step-1]}') 
         return sequences
     
     def formal_to_story(self, sequence_list):
         strings = []
         for e in sequence_list:
-            e.replace('\n','')
-            e = e.replace(f'{self.relation}(','').replace(')','')
-            subject, loc, time = e.split(',')
-            res = f'{subject} {self.relation.replace("_", " ") if "hole" in loc else self.relation.replace("_", " ").replace("in","out to the") }{loc}'
-            #print(res)
-            strings.append(res)
+            if e[0] == '*':
+                strings.append(e[1:])
+            else:
+                e.replace('\n','')
+                e = e.replace(f'{self.relation}(','').replace(')','')
+                subject, loc, time = e.split(',')
+                # TODO: Fix for both objects being placed and holes set up  
+                res = f'{subject} {self.relation.replace("_", " ") if "hole" in loc else self.relation.replace("_", " ").replace("in","in") }{loc}'
+                #print(res)
+                strings.append(res)
         return '. '.join(strings).strip() 
+    
+    
+def write_on_wall_then_erase(actors, locs, g, mislead, length):
+    poi = random.sample(actors, 3)
+    loc_1 = random.sample(locs,1)
+    loc_2 = random.sample(g[loc_1[0]], 1)
+    loc_3 = random.sample([l for l in g[loc_2[0]] if l != loc_1[0]], 1)
+    event_dict = {}
+    actions_dict = {}
+    event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc_1, "path_type":"same"}
+    actions_dict[10] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
+    event_dict[20] = {"name": "cross_paths","actors": poi[1:], "location": loc_2, "path_type":"same", "prev": loc_1[0]}
+    actions_dict[20] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
+    event_dict[21] = {"name":"move", "actor":poi[-1],"location":loc_3[0]}
+    event_dict[22] = {"name": "exclusive_random", "actors": poi, "stop": length}
+    actions_dict[length-2] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
+    experiment_info = {'cross path location': loc_1[0], 'poi':poi, "draw":[11, 22, length-2]}
+    return event_dict, actions_dict, loc_2, experiment_info
 
 if __name__ == '__main__':
     # possible_people = ["Alice", "Bob", "Charlie", "Danny", "Edward", "Frank", "Georgia", "Hank", "Isaac", "Jake", "Kevin"]
@@ -319,7 +345,6 @@ if __name__ == '__main__':
     #     third_loc = random.sample([l for l in locations[:-1] if l != loc[0] and l != second_loc[0]], 1)
     #     print(poi)
         
-    #     # TODO: Multi cross paths for deeper ToM    
     #     event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc, "path_type": "same"}
     #     event_dict[11] = {"name":"move", "actor":poi[-1], "location": second_loc[0]}
     #     event_dict[17] = {"name": "cross_paths","actors": poi[1:], "location": third_loc, "path_type": "same"}
@@ -337,6 +362,46 @@ if __name__ == '__main__':
     #     story = sim.formal_to_story(res)
     #     print("\n".join(story.split(".")))
     #     print('-----')
-    pass
+    possible_people = ["Alice", "Bob", "Charlie", "Danny", "Edward", "Frank", "Georgia", "Hank", "Isaac", "Jake", "Kevin"]
+    num_people = 5
+
+    graph = { 
+        "room_1": ["room_2", "the_hallway","room_5"],
+        "room_2": ["room_1", "room_3","the_hallway"],
+        "room_3": ["room_2", "room_4","the_hallway"],
+        "room_4": ["room_3", "room_5","room_1"],
+        "room_5": ["room_4", "room_1","room_2"],
+        "the_hallway": ["room_1", "room_4","room_2"]
+    }
+
+    locations = list(graph.keys())
+    story_length = 30
+    num_trials = 3
+    mislead_distance = 3
+
+    random.seed(25)
+
+    for _ in range(num_trials):
+        event_dict, actions_dict, label, experiment_dict = write_on_wall_then_erase(possible_people[:num_people], locations[:-1], graph, mislead_distance, story_length)
+    
+
+        sim = StorySimulator(
+            people=possible_people[:num_people],
+            locations=locations,
+            relation="enters",
+            params={'prompt': '3', 'type': 'cot'},
+            graph=graph,
+            events=event_dict,
+            actions=actions_dict
+        )
+        res = sim.run_simulation(story_length)
+        
+        story = sim.formal_to_story(res)
+        
+        split_story = story.split('.')
+        #split_story.insert(story_length-1, f" {experiment_dict['poi'][1]} forgets what they last saw on the wall")
+        print(".\n".join(split_story))
+        print('-----')
+        pass
             
             
