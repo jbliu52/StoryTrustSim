@@ -3,9 +3,11 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import random
+from storyboard import Storyboard
 from storysim import StorySimulator
 import pandas as pd
 from together import Together
+from experiment_defs import mislead_experiment
 
 load_dotenv()
 
@@ -50,19 +52,19 @@ Experiment defitions
 
 '''
 
-def mislead_experiment(actors, locs, g, mislead, length):
-    poi = random.sample(actors, 2)
-    loc = random.sample(locs, 1)
-    second_loc = random.choice(g[loc[0]])
-    third_loc = random.choice([l for l in g[second_loc] if l not in loc])
-    event_dict = {}
-    event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc, "path_type": "same"}
-    event_dict[11] = {"name":"move", "actor":poi[-1], "location": second_loc}
-    event_dict[12] = {"name": "exclusive_random", "actors": poi, "stop": 12 + mislead}
-    event_dict[12 + mislead] = {"name":"move", "actor":poi[-1],"location":third_loc}
-    event_dict[12 + mislead+1] = {"name": "exclusive_random", "actors": poi, "stop": length}
-    experiment_info = {'cross path location': loc[0], 'poi':poi, 'last':third_loc}
-    return event_dict, second_loc, experiment_info
+# def mislead_experiment(actors, locs, g, mislead, length):
+#     poi = random.sample(actors, 2)
+#     loc = random.sample(locs, 1)
+#     second_loc = random.choice(g[loc[0]])
+#     third_loc = random.choice([l for l in g[second_loc] if l not in loc])
+#     event_dict = {}
+#     event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc, "path_type": "same"}
+#     event_dict[11] = {"name":"move", "actor":poi[-1], "location": second_loc}
+#     event_dict[12] = {"name": "exclusive_random", "actors": poi, "stop": 12 + mislead}
+#     event_dict[12 + mislead] = {"name":"move", "actor":poi[-1],"location":third_loc}
+#     event_dict[12 + mislead+1] = {"name": "exclusive_random", "actors": poi, "stop": length}
+#     experiment_info = {'cross path location': loc[0], 'poi':poi, 'last':third_loc}
+#     return event_dict, second_loc, experiment_info
 
 def spaced_mislead_experiment(actors, locs, g, mislead, length):
     event_dict = {}
@@ -187,35 +189,31 @@ for v in range(len(values)):
 
     for _ in range(num_trials):
         
-        event_dict, label, experiment_dict = mislead_experiment(possible_people[:num_people], locations[:-1], graph, mislead_distance, story_length)
+        event_dict, max_actor = mislead_experiment(mislead_distance, story_length)
+        storyboard = Storyboard('enters', graph, possible_people[:num_people], story_length, event_dict)
 
         sim = StorySimulator(
             people=possible_people[:num_people],
             locations=locations,
             relation="enters",
-            params={'prompt': '3', 'type': 'cot'}, 
-            graph=graph,
-            events=event_dict,
-            actions={}
+            params={'prompt': '3', 'type': 'cot'},
+            storyboard=storyboard,
+            graph=graph
         )
 
         res = sim.run_simulation(story_length)
 
         story = sim.formal_to_story(res)
         d = {'Story':[], 'Label':[], 'P1':[], 'P2':[]}
-        d['P1'] = ",".join(experiment_dict['poi'][:-1]) if len(experiment_dict['poi'][:-1]) > 1 else experiment_dict['poi'][:-1]
+        d['P1'] = ','.join([storyboard.actor_mapping[str(a)] for a in range(int(max_actor))])
         #print(d["P1"])
-        d['P2'] = experiment_dict['poi'][-1]
+        d['P2'] = storyboard.actor_mapping[str(int(max_actor))]
         d['Story'].append(story)
-        # d['Label'].append(movement[0])
-        d['Label'].append(label)
-        d['Last'] = experiment_dict['last']
-        d['CP_Loc'] = experiment_dict.get('cross paths locs', [None, None])[-1]
+        d['Label'].append(storyboard.loc_mapping[sorted(storyboard.loc_mapping.keys())[-2]])
+        #d['Last'] = experiment_dict['obj']
         df = pd.concat([df, pd.DataFrame(d)])   
-        
-    # Prompt model
     
-        
+    # Prompt model
     intial_prompt = f"Read the following story and answer the question at the end. Note that all characters start in {sim.locations[-1].replace('_',' ')}. Characters in the same location can see where eachother go when someone leaves. If characters are in different locations, they cannot see eachother."
     tom_responses, wm_responses = [], []
     #model_choice =  "deepseek-ai/DeepSeek-R1"
@@ -242,7 +240,7 @@ for v in range(len(values)):
             print(f'Index {i}')
             print("\n-////==============////-\n")
     print(len(unknown))
-    df.to_csv(f'mislead_second_order/holes_{model_choice.replace("/","_")}_{values[v]}.csv')
+    #df.to_csv(f'mislead_second_order/holes_{model_choice.replace("/","_")}_{values[v]}.csv')
         
 for i in range(len(knowns)):
     score = sum([1 for k in knowns[i] if k == 'True'])

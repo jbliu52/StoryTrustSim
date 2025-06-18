@@ -7,3 +7,6 @@
 
 # Ignore environment files
 .env
+
+view_results.ipynb
+plot_generator.ipynb

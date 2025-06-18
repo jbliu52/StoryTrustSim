@@ -7,26 +7,16 @@ import numpy as np
 import regex as re
 import pandas as pd
 from scipy import stats
-
+from collections import defaultdict
+from storyboard import Storyboard
 
 '''
-Storyboard - a set of events that are required to happen. An outline of the story.
-
-constraints = [cross(Alice, Bob, 5, hole_4)]
-cross(X,Y) -> Path for X to hole_4 steps interleaved with Y to hole_4
--> Figure out number of steps it takes, then do shuffle on that
-
-
+StorySimulator: A class to generate a story based on a Storyboard. The events of the story will be randomly generated aside from what's specified by the storyboard.
 '''
 
 class StorySimulator:
-    def __init__(self, people, locations, relation, params, trial_seed=None, graph=None, events=None, storyboard=None, actions=None):
-        from collections import defaultdict
-        # load_dotenv()
-        # self.api_key = os.getenv('OPENAI_KEY')
-        # os.environ['OPENAI_API_KEY'] = self.api_key
-
-
+    def __init__(self, people, locations, relation: str | list[str], params, storyboard: Storyboard, trial_seed=None, graph=None, actions=None):
+        
         # Experiment constants
         self.people = people
         self.locations = locations
@@ -49,10 +39,11 @@ class StorySimulator:
         # Simulation time step
         self.time_step = 0
         # Observation steps
-        self.events = events if events else dict()
+        self.events = storyboard.events if storyboard is not None else {}
+        self.actions = storyboard.actions if storyboard is not None else {}
         
         self.current_locations = {person: [self.locations[-1]] for person in self.people}
-
+  
     def _create_fully_connected_graph(self):
         """Creates a fully connected graph from locations."""
         return {loc: [l for l in self.locations if l != loc] for loc in self.locations}
@@ -112,13 +103,12 @@ class StorySimulator:
   
     def run_simulation(self, steps):
         # Initialize
-        
         knuth = [0] * steps
         left, start = 0, 0
         # Storing the path for all the required events
         required_events = {}
         if self.actions:
-            actions = {t: f"{self.actions[t]['actor']} {self.actions[t]['action']}" for t in self.actions}
+            actions = {t: f"{self.actions[t]['action']}" for t in self.actions}
         # Planning phase
         for t in self.events:
             ev = self.events[t]
@@ -167,7 +157,7 @@ class StorySimulator:
                 knuth[t] = -101
                 start = t + 1
             elif ev['name'] == 'move':
-                required_events[t] = ev['actor']
+                required_events[t] = ev['actors']
                 knuth[t] = -102
                 start = t + 1
         # Generation step
@@ -185,7 +175,7 @@ class StorySimulator:
                     paths = required_events[next_event]
                     indices = [0] * len(paths)
                 actor = self.events[next_event]['actors'][i-1]
-                sequences.append(f"{self.relation}({actor}, {paths[i-1][indices[i-1]]}, {self.time_step})\n")
+                sequences.append(self.event_statement(actor, paths[i-1][indices[i-1]]))
                 self.update_state(actor, paths[i-1][indices[i-1]])
                 indices[i-1] += 1
                 self.time_step += 1    
@@ -193,7 +183,7 @@ class StorySimulator:
                 # Move the last person in the actor list to the appropriate spot
                 new_loc = self.events[next_event]['location']
                 actor = self.events[next_event]['actors'][-1]
-                sequences.append(f"{self.relation}({actor}, {new_loc[-1]}, {self.time_step})\n")
+                sequences.append(self.event_statement(actor, new_loc[-1]))
                 self.update_state(actor, new_loc[-1])
                 self.time_step += 1
                 # Reset
@@ -212,7 +202,7 @@ class StorySimulator:
                 location_set = {self.current_locations[p][-1] for p in mislead_person}
                 choices = [l for l in self.possible_moves[poi] if l not in location_set]
                 new_loc = random.choice(choices)
-                sequences.append(f"{self.relation}({poi}, {new_loc}, {self.time_step})\n")
+                sequences.append(self.event_statement(poi, new_loc))
                 self.update_state(poi, new_loc)
                 self.time_step += 1
                 try:
@@ -222,11 +212,11 @@ class StorySimulator:
                     continue
             elif i == -102:
                 # Move person 2, but person 1 knows
-                new_loc = self.events[next_event]['location']
+                new_loc = self.events[next_event]['location'][0]
                 if self.events[next_event]['name'] != 'move':
                     print(self.events[next_event])
-                actor = self.events[next_event]['actor']
-                sequences.append(f"{self.relation}({actor}, {new_loc}, {self.time_step})\n")
+                actor = self.events[next_event]['actors'][0]
+                sequences.append(self.event_statement(actor, new_loc))
                 self.update_state(actor, new_loc)
                 self.time_step += 1
                 try:
@@ -238,7 +228,7 @@ class StorySimulator:
                 excluded_actors = set(required_events[next_event][0])
                 person = random.choice([p for p in self.people if p not in excluded_actors])
                 loc = random.choice(self.possible_moves[person])
-                sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
+                sequences.append(self.event_statement(person, loc))
                 self.update_state(person, loc)
                 self.time_step += 1
                 if self.time_step == required_events[next_event][1]:
@@ -247,161 +237,41 @@ class StorySimulator:
                     except:
                         # This means we're done
                         continue
-            else:
+            else: 
                 if self.events:
                     choices = [p for p in self.people if p not in self.events[next_event]['actors']]
                 else:
                     choices = self.people
                 person = random.choice(choices)
                 loc = random.choice(self.possible_moves[person])
-                sequences.append(f"{self.relation}({person}, {loc}, {self.time_step})\n")
+                sequences.append(self.event_statement(person, loc))
                 self.update_state(person, loc)
                 self.time_step += 1
             if self.actions and self.time_step - 1 in actions:
                 sequences.append(f'*{actions[self.time_step-1]}') 
         return sequences
     
-    def formal_to_story(self, sequence_list):
+    def formal_to_story(self, sequence_list: list[str]):
         strings = []
         for e in sequence_list:
             if e[0] == '*':
                 strings.append(e[1:])
             else:
-                e.replace('\n','')
-                e = e.replace(f'{self.relation}(','').replace(')','')
+                e = e.replace('\n','')
+                r = e.split('(')[0]
+                e = e.replace(f'{r}(','').replace(')','')
                 subject, loc, time = e.split(',')
                 # TODO: Fix for both objects being placed and holes set up  
-                res = f'{subject} {self.relation.replace("_", " ") if "hole" in loc else self.relation.replace("_", " ").replace("in","in") }{loc}'
+                res = f'{subject} {r.replace("_", " ") if "hole" in loc else r.replace("_", " ").replace("in","in") }{loc}'
                 #print(res)
                 strings.append(res)
-        return '. '.join(strings).strip() 
+        return '. '.join(strings).strip()
     
-    
-def write_on_wall_then_erase(actors, locs, g, mislead, length):
-    poi = random.sample(actors, 3)
-    loc_1 = random.sample(locs,1)
-    loc_2 = random.sample(g[loc_1[0]], 1)
-    loc_3 = random.sample([l for l in g[loc_2[0]] if l != loc_1[0]], 1)
-    event_dict = {}
-    actions_dict = {}
-    event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc_1, "path_type":"same"}
-    actions_dict[10] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
-    event_dict[20] = {"name": "cross_paths","actors": poi[1:], "location": loc_2, "path_type":"same", "prev": loc_1[0]}
-    actions_dict[20] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
-    event_dict[21] = {"name":"move", "actor":poi[-1],"location":loc_3[0]}
-    event_dict[22] = {"name": "exclusive_random", "actors": poi, "stop": length}
-    actions_dict[length-2] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
-    experiment_info = {'cross path location': loc_1[0], 'poi':poi, "draw":[11, 22, length-2]}
-    return event_dict, actions_dict, loc_2, experiment_info
-
-if __name__ == '__main__':
-    # possible_people = ["Alice", "Bob", "Charlie", "Danny", "Edward", "Frank", "Georgia", "Hank", "Isaac", "Jake", "Kevin"]
-    # num_people = 8
-    # # graph = {
-    # #         "hole_1": ["hole_2", "field"],
-    # #         "hole_2": ["hole_1", "hole_3"],
-    # #         "hole_3": ["hole_2", "hole_4"],
-    # #         "hole_4": ["hole_3", "field"],
-    # #         "field": ["hole_1", "hole_4"]
-    # #     }
-    
-    # graph = { 
-    #     "hole_1": ["hole_2", "field","hole_5"],
-    #     "hole_2": ["hole_1", "hole_3","field"],
-    #     "hole_3": ["hole_2", "hole_4","field"],
-    #     "hole_4": ["hole_3", "hole_5","hole_1"],
-    #     "hole_5": ["hole_4", "hole_1","hole_2"],
-    #     "field": ["hole_1", "hole_4","hole_2"]
-    # }
-    
-    # # graph = { 
-    # #     "hole_1": ["hole_2", "field", "hole_5", "hole_6", "hole_4"],
-    # #     "hole_2": ["hole_1", "hole_3", "field", "hole_5", "hole_7"],
-    # #     "hole_3": ["hole_2", "hole_4", "field", "hole_8", "hole_1"],
-    # #     "hole_4": ["hole_3", "hole_5", "hole_1", "hole_9", "field"],
-    # #     "hole_5": ["hole_4", "hole_1", "hole_2", "hole_10", "field"],
-    # #     "hole_6": ["hole_1", "hole_7", "hole_9", "field"],
-    # #     "hole_7": ["hole_6", "hole_2", "hole_8", "field"],
-    # #     "hole_8": ["hole_7", "hole_3", "hole_9", "field"],
-    # #     "hole_9": ["hole_8", "hole_4", "hole_6", "hole_10", "field"],
-    # #     "hole_10": ["hole_9", "hole_5", "field", "hole_7"],
-    # #     "field": ["hole_1", "hole_2", "hole_3", "hole_4", "hole_9", "hole_10"]
-    # # }
-    
-    # locations = list(graph.keys())
-    # story_length = 25
-    # num_trials = 10
-    # mislead_distance = 3
-
-    # random.seed(25)
-
-    # for _ in range(num_trials):
-    #     event_dict = {}
-        
-    #     mislead_1 = 3
-    #     poi = random.sample(possible_people[:num_people], 3)
-    #     loc = random.sample(locations[:-1],1)
-    #     second_loc = random.sample([l for l in locations[:-1] if l != loc[0]], 1)
-    #     third_loc = random.sample([l for l in locations[:-1] if l != loc[0] and l != second_loc[0]], 1)
-    #     print(poi)
-        
-    #     event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc, "path_type": "same"}
-    #     event_dict[11] = {"name":"move", "actor":poi[-1], "location": second_loc[0]}
-    #     event_dict[17] = {"name": "cross_paths","actors": poi[1:], "location": third_loc, "path_type": "same"}
-    #     event_dict[18] = {"name": "exclusive_random", "actors": poi, "stop": story_length}   
-            
-    #     sim = StorySimulator(
-    #         people=possible_people[:num_people],
-    #         locations=list(graph.keys()),
-    #         relation="jumps_in",
-    #         params={'prompt': '3', 'type': 'cot'},
-    #         graph=graph,
-    #         events=event_dict
-    #     )
-    #     res = sim.run_simulation(story_length)
-    #     story = sim.formal_to_story(res)
-    #     print("\n".join(story.split(".")))
-    #     print('-----')
-    possible_people = ["Alice", "Bob", "Charlie", "Danny", "Edward", "Frank", "Georgia", "Hank", "Isaac", "Jake", "Kevin"]
-    num_people = 5
-
-    graph = { 
-        "room_1": ["room_2", "the_hallway","room_5"],
-        "room_2": ["room_1", "room_3","the_hallway"],
-        "room_3": ["room_2", "room_4","the_hallway"],
-        "room_4": ["room_3", "room_5","room_1"],
-        "room_5": ["room_4", "room_1","room_2"],
-        "the_hallway": ["room_1", "room_4","room_2"]
-    }
-
-    locations = list(graph.keys())
-    story_length = 30
-    num_trials = 3
-    mislead_distance = 3
-
-    random.seed(25)
-
-    for _ in range(num_trials):
-        event_dict, actions_dict, label, experiment_dict = write_on_wall_then_erase(possible_people[:num_people], locations[:-1], graph, mislead_distance, story_length)
-    
-
-        sim = StorySimulator(
-            people=possible_people[:num_people],
-            locations=locations,
-            relation="enters",
-            params={'prompt': '3', 'type': 'cot'},
-            graph=graph,
-            events=event_dict,
-            actions=actions_dict
-        )
-        res = sim.run_simulation(story_length)
-        
-        story = sim.formal_to_story(res)
-        
-        split_story = story.split('.')
-        #split_story.insert(story_length-1, f" {experiment_dict['poi'][1]} forgets what they last saw on the wall")
-        print(".\n".join(split_story))
-        print('-----')
-        pass
-            
-            
+    def event_statement(self, subject, object):
+        if isinstance(self.relation, str):
+            return f"{self.relation}({subject}, {object}, {self.time_step})\n"
+        elif  isinstance(self.relation, list):
+            relation = random.choice(self.relation)
+            return f"{relation}({subject}, {object}, {self.time_step})\n"
+        else:
+            raise ValueError("Relation must be a string or a list of strings.")
