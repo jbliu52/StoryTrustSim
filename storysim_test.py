@@ -64,7 +64,7 @@ random.seed(25)
 #     sim = StorySimulator(
 #         people=possible_people[:num_people],
 #         locations=locations,
-#         relation=["enters", "widens", "illuminates", "deepens"],
+#         action=["enters", "widens", "illuminates", "deepens"],
 #         params={'prompt': '3', 'type': 'cot'},
 #         storyboard=storyboard,
 #         graph=graph
@@ -79,19 +79,19 @@ random.seed(25)
 for _ in range(num_trials):
 
     event_dict = dict()
-    action_dict = dict()
+    manual_action_dict = dict()
     
     event_dict[1] = {"name":"move", "actors":['0'],"location":['0']}
     event_dict[5] = {"name": "cross_paths","actors": ['0','1'], "location": ['1'], "path_type": "same"}
-    action_dict[5] = {'action': '0 and 1 exchange phone numbers'}
+    manual_action_dict[5] = {'action': '0 and 1 exchange phone numbers'}
     event_dict[9] = {"name":"cross_paths","actors": ['0','1'], "location": ['2'], "path_type": "same"}
-    action_dict[9] = {'action': '0 calls their friends on the phone to tell them what happened'}
-    storyboard = Storyboard('goes_to', graph, possible_people[:num_people], story_length, event_dict, actions=action_dict)
+    manual_action_dict[9] = {'action': '0 calls their friends on the phone to tell them what happened'}
+    storyboard = Storyboard('goes_to', graph, possible_people[:num_people], story_length, event_dict, manual_actions=manual_action_dict)
     
     sim = StorySimulator(
         people=possible_people[:num_people],
         locations=locations,
-        relation=['goes_to', 'arrives_at', 'heads_to'],
+        action=['goes_to', 'arrives_at', 'heads_to'],
         params={},
         storyboard=storyboard,
         graph=graph

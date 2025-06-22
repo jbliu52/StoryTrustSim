@@ -1,35 +1,23 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from openai import OpenAI
-from dotenv import load_dotenv
-import os
 import random
-import numpy as np
-import regex as re
-import pandas as pd
-from scipy import stats
-from collections import defaultdict
 from storyboard import Storyboard
 
 '''
-StorySimulator: A class to generate a story based on a Storyboard. The events of the story will be randomly generated aside from what's specified by the storyboard.
+StorySimulator: A class to generate a story based on a Storyboard. The events of the story will be randomly generated aside from what's specified by the storyboard. 
 '''
 
 class StorySimulator:
-    def __init__(self, people, locations, relation: str | list[str], params, storyboard: Storyboard, trial_seed=None, graph=None, actions=None):
+    def __init__(self, people, locations, action: str | list[str], storyboard: Storyboard, trial_seed=None, graph=None, manual_actions=None):
         
         # Experiment constants
         self.people = people
         self.locations = locations
-        self.relation = relation
+        self.action = action
         self.seed = trial_seed
-        self.actions = actions
+        self.manual_actions = manual_actions
         if self.seed is not None:
             random.seed(self.seed)
-        self.params = params
-        # self.initial_prompt = f"Read the following story and answer the question at the end. Note that all characters start in the {self.locations[-1]}."
         self.sequences = []
         self.storyboard = storyboard
-        #self.client = OpenAI()
         
         self.state = dict()
         # Adjacency graph for locations
@@ -40,7 +28,7 @@ class StorySimulator:
         self.time_step = 0
         # Observation steps
         self.events = storyboard.events if storyboard is not None else {}
-        self.actions = storyboard.actions if storyboard is not None else {}
+        self.manual_actions = storyboard.manual_actions if storyboard is not None else {}
         
         self.current_locations = {person: [self.locations[-1]] for person in self.people}
   
@@ -107,8 +95,8 @@ class StorySimulator:
         left, start = 0, 0
         # Storing the path for all the required events
         required_events = {}
-        if self.actions:
-            actions = {t: f"{self.actions[t]['action']}" for t in self.actions}
+        if self.manual_actions:
+            manual_actions = {t: f"{self.manual_actions[t]['action']}" for t in self.manual_actions}
         # Planning phase
         for t in self.events:
             ev = self.events[t]
@@ -131,8 +119,6 @@ class StorySimulator:
                         prev = path_step[-1][1][-1]
                     path_step = (sum([p[0] for p in path_step]), sum([p[1] for p in path_step], []))
                     path_info.append(path_step)
-                # Combine paths
-                # path_info = [self.find_shortest_path(self.current_locations[p][-1], ev['location']) for p in group]
                 left = start
                 for p_i in range(len(group)):
                     right = left + path_info[p_i][0]
@@ -160,8 +146,6 @@ class StorySimulator:
                 required_events[t] = ev['actors']
                 knuth[t] = -102
                 start = t + 1
-        # Generation step
-        # print(knuth)
         # Generation phase
         sequences = []
         if self.events:
@@ -169,7 +153,8 @@ class StorySimulator:
             next_event = next(event_list)        
             paths, indices = None, None
         for i in knuth:
-            if i > 0 : # Cross paths
+            # Cross paths
+            if i > 0 :
                 if paths == None: 
                     # Index of a person to make cross paths
                     paths = required_events[next_event]
@@ -180,7 +165,7 @@ class StorySimulator:
                 indices[i-1] += 1
                 self.time_step += 1    
             elif i == -100:
-                # Move the last person in the actor list to the appropriate spot
+                # Last step of cross paths
                 new_loc = self.events[next_event]['location']
                 actor = self.events[next_event]['actors'][-1]
                 sequences.append(self.event_statement(actor, new_loc[-1]))
@@ -195,10 +180,10 @@ class StorySimulator:
                     # This means we're done
                     continue
             elif i == -101:
+                # Mislead
                 choices = []
                 mislead_person = required_events[next_event][0:-1]
                 poi = required_events[next_event][-1]
-                # Mislead person 1
                 location_set = {self.current_locations[p][-1] for p in mislead_person}
                 choices = [l for l in self.possible_moves[poi] if l not in location_set]
                 new_loc = random.choice(choices)
@@ -211,7 +196,7 @@ class StorySimulator:
                     # This means we're done
                     continue
             elif i == -102:
-                # Move person 2, but person 1 knows
+                # Move
                 new_loc = self.events[next_event]['location'][0]
                 if self.events[next_event]['name'] != 'move':
                     print(self.events[next_event])
@@ -247,8 +232,8 @@ class StorySimulator:
                 sequences.append(self.event_statement(person, loc))
                 self.update_state(person, loc)
                 self.time_step += 1
-            if self.actions and self.time_step - 1 in actions:
-                sequences.append(f'*{actions[self.time_step-1]}') 
+            if self.manual_actions and self.time_step - 1 in manual_actions:
+                sequences.append(f'*{manual_actions[self.time_step-1]}') 
         return sequences
     
     def formal_to_story(self, sequence_list: list[str]):
@@ -261,17 +246,15 @@ class StorySimulator:
                 r = e.split('(')[0]
                 e = e.replace(f'{r}(','').replace(')','')
                 subject, loc, time = e.split(',')
-                # TODO: Fix for both objects being placed and holes set up  
                 res = f'{subject} {r.replace("_", " ") if "hole" in loc else r.replace("_", " ").replace("in","in") }{loc}'
-                #print(res)
                 strings.append(res)
         return '. '.join(strings).strip()
     
     def event_statement(self, subject, object):
-        if isinstance(self.relation, str):
-            return f"{self.relation}({subject}, {object}, {self.time_step})\n"
-        elif  isinstance(self.relation, list):
-            relation = random.choice(self.relation)
-            return f"{relation}({subject}, {object}, {self.time_step})\n"
+        if isinstance(self.action, str):
+            return f"{self.action}({subject}, {object}, {self.time_step})\n"
+        elif  isinstance(self.action, list):
+            action = random.choice(self.action)
+            return f"{action}({subject}, {object}, {self.time_step})\n"
         else:
-            raise ValueError("Relation must be a string or a list of strings.")
+            raise ValueError("action must be a string or a list of strings.")

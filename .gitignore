@@ -8,5 +8,8 @@
 # Ignore environment files
 .env
 
+# Other
 view_results.ipynb
 plot_generator.ipynb
+
+figures/

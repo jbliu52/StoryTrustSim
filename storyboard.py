@@ -10,11 +10,11 @@ the characters involved, and the location of the event. Each event will need to 
 '''
 
 class Storyboard:    
-    def __init__(self, relation: str, graph: dict, actor_pool: list, story_length: int, events: dict, actions: dict = None, locations: list = []):
-        self.relation = relation
+    def __init__(self, action: str, graph: dict, actor_pool: list, story_length: int, events: dict, manual_actions: dict = None, locations: list = []):
+        self.action = action
         self.graph = graph
-        # TODO: Actions
-        self.actions = actions if actions is not None else {}
+        # TODO: manual_actions
+        self.manual_actions = manual_actions if manual_actions is not None else {}
         if graph is not None:
             self.locations = list(graph.keys())
         elif len(locations) > 0:
@@ -24,7 +24,7 @@ class Storyboard:
         
         
         self.events = copy.deepcopy(events)
-        self.actions = copy.deepcopy(actions) if actions is not None else {}
+        self.manual_actions = copy.deepcopy(manual_actions) if manual_actions is not None else {}
         self.actor_pool = actor_pool.copy()
 
         self.actor_mapping = dict()
@@ -65,21 +65,21 @@ class Storyboard:
                         if label not in self.loc_mapping:
                             self.loc_mapping[label] = next(graph)                         # type: ignore
                         self.events[time_step]['location'][i] = self.loc_mapping[label]
-            elif 'prev' in self.events[time_step]:
-                self.events[time_step]['prev'] = self.loc_mapping[self.events[time_step]['prev']]
-        # Use the same mappings to construct actions
-        for time_step in self.actions.keys():
-            self.actions[time_step]['action'] = self.actions[time_step]['action'].split(' ')
-            mapped_str = [self.actor_mapping[a] if a in self.actor_mapping else a for a in self.actions[time_step]['action']]
-            self.actions[time_step]['action'] = ' '.join(mapped_str)
+            if 'prev' in self.events[time_step]:
+                self.events[time_step]['prev'] = self.loc_mapping[self.events[time_step]['prev'][0]]
+        # Use the same mappings to construct manual_actions
+        for time_step in self.manual_actions.keys():
+            self.manual_actions[time_step]['action'] = self.manual_actions[time_step]['action'].split(' ')
+            mapped_str = [self.actor_mapping[a] if a in self.actor_mapping else a for a in self.manual_actions[time_step]['action']]
+            self.manual_actions[time_step]['action'] = ' '.join(mapped_str)
             
             
             
             
     def __str__(self):
         event_str = '\n'.join([str(item) for item in self.events.items()])
-        action_str = '\n'.join([str(item) for item in self.actions.items()])
-        return f"Events: {event_str} \n Actions: {action_str}"
+        action_str = '\n'.join([str(item) for item in self.manual_actions.items()])
+        return f"Events: {event_str} \n manual_actions: {action_str}"
 
         
     def __len__(self):
@@ -133,6 +133,6 @@ def traverse_graph_bfs(g: dict, start):
 #     5: {"name": "exclusive_random", "actors": "0,1", "stop": story_length-1},
 #     story_length-1: {"name":"move", "actors": "3", "location": "3"}
 # }
-# actions = {2: {'action': "1 places a marble in the basket, 0 empties the basket and places a figurine inside"}}
-# storyboard = Storyboard("enter", graph, actor_pool, story_length, events, actions=actions)
+# manual_actions = {2: {'action': "1 places a marble in the basket, 0 empties the basket and places a figurine inside"}}
+# storyboard = Storyboard("enter", graph, actor_pool, story_length, events, manual_actions=manual_actions)
 # print(storyboard)

@@ -131,12 +131,12 @@ Experiment defitions
 #     event_dict[4] = {"name": "cross_paths","actors": poi, "location": loc, "path_type": "same"}
 #     event_dict[5] = {"name":"move", "actor":poi[-1], "location": second_loc}
 #     event_dict[6] = {"name": "exclusive_random", "actors": poi, "stop": n}
-#     actions_dict = {}
+#     manual_actions_dict = {}
 #     obj = random.sample(["marble", "figurine", "doll"], 2)
-#     actions_dict[4] = {'actor':poi[-1], 'action': f'places a {obj[0]} in the basket'}
-#     actions_dict[5] = {'actor':poi[0], 'action':f'empties the basket and places a {obj[1]} inside'}
+#     manual_actions_dict[4] = {'actor':poi[-1], 'action': f'places a {obj[0]} in the basket'}
+#     manual_actions_dict[5] = {'actor':poi[0], 'action':f'empties the basket and places a {obj[1]} inside'}
 #     experiment_info = {'cross path location': loc[0], 'poi':poi, "obj": obj[0]}
-#     return event_dict, second_loc, experiment_info, actions_dict
+#     return event_dict, second_loc, experiment_info, manual_actions_dict
 
 
 
@@ -172,15 +172,14 @@ random.seed(25)
 
 for _ in range(num_trials):
     
-    #event_dict, label, experiment_dict, actions_dict = sally_anne(possible_people[:num_people], locations[:-1], graph, story_length)        
-    event_dict, action_dict, max_actor, label = sally_anne(story_length)
-    storyboard = Storyboard('enters', graph, possible_people[:num_people], story_length, event_dict, actions=action_dict)
+    #event_dict, label, experiment_dict, manual_actions_dict = sally_anne(possible_people[:num_people], locations[:-1], graph, story_length)        
+    event_dict, manual_action_dict, max_actor, label = sally_anne(story_length)
+    storyboard = Storyboard('enters', graph, possible_people[:num_people], story_length, event_dict, manual_actions=manual_action_dict)
     
     sim = StorySimulator(
         people=possible_people[:num_people],
         locations=locations,
-        relation="enters",
-        params={'prompt': '3', 'type': 'cot'},
+        action="enters",
         storyboard=storyboard,
         graph=graph
     )

@@ -111,16 +111,16 @@ def write_on_wall_then_erase(actors, locs, g, mislead, length):
     loc_2 = random.sample(g[loc_1[0]], 1)
     loc_3 = random.sample([l for l in g[loc_2[0]] if l != loc_1[0]], 1)
     event_dict = {}
-    actions_dict = {}
+    manual_actions_dict = {}
     event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc_1, "path_type":"same"}
-    actions_dict[10] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
+    manual_actions_dict[10] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
     event_dict[20] = {"name": "cross_paths","actors": poi[1:], "location": loc_2, "path_type":"same", "prev": loc_1[0]}
-    actions_dict[20] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
+    manual_actions_dict[20] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
     event_dict[21] = {"name":"move", "actor":poi[-1],"location":loc_3[0]}
     event_dict[22] = {"name": "exclusive_random", "actors": poi, "stop": length}
-    actions_dict[length-2] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
+    manual_actions_dict[length-2] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
     experiment_info = {'cross path location': loc_1[0], 'poi':poi, "draw":[11, 22, length-2]}
-    return event_dict, actions_dict, loc_2, experiment_info
+    return event_dict, manual_actions_dict, loc_2, experiment_info
 
 def placed_objects(actors, locs, g, mislead, length):
     poi = random.sample(actors, 3)
@@ -128,37 +128,37 @@ def placed_objects(actors, locs, g, mislead, length):
     loc_2 = random.sample(g[loc_1[0]], 1)
     loc_3 = random.sample([l for l in g[loc_2[0]] if l != loc_1[0]], 1)
     event_dict = {}
-    actions_dict = {}
+    manual_actions_dict = {}
     event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc_1, "path_type":"same"}
-    actions_dict[10] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
+    manual_actions_dict[10] = {'actor':poi[-1], 'action': 'draws a circle on the wall'}
     event_dict[20] = {"name": "cross_paths","actors": poi[1:], "location": loc_2, "path_type":"same", "prev": loc_1[0]}
-    actions_dict[20] = {'actor':poi[-1], 'action': 'puts their phone on the ground'}
+    manual_actions_dict[20] = {'actor':poi[-1], 'action': 'puts their phone on the ground'}
     event_dict[21] = {"name":"move", "actor":poi[-1],"location":loc_3[0]}
     event_dict[22] = {"name": "exclusive_random", "actors": poi, "stop": length}
     experiment_info = {'cross path location': loc_1[0], 'poi':poi, "draw":[11, 22, length-2]}
-    return event_dict, actions_dict, "No", experiment_info
+    return event_dict, manual_actions_dict, "No", experiment_info
     
-def second_order_tom_extension(actors, locs, g, length, actions_done=False):
+def second_order_tom_extension(actors, locs, g, length, manual_actions_done=False):
     poi = random.sample(actors, 3)
     loc_1 = random.sample(locs,1)
     loc_2 = random.sample(g[loc_1[0]], 1)
     loc_3 = random.sample([l for l in g[loc_2[0]] if l != loc_1[0]], 1)
     event_dict = {}
-    actions_dict = {}
+    manual_actions_dict = {}
     event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc_1, "path_type":"same"}
     event_dict[20] = {"name": "cross_paths","actors": poi[1:], "location": loc_2, "path_type":"same", "prev": loc_1[0]}
     event_dict[21] = {"name":"move", "actor":poi[-1],"location":loc_3[0]}
     event_dict[22] = {"name": "exclusive_random", "actors": poi, "stop": length}
     
     shape = None
-    if actions_done:
+    if manual_actions_done:
         shape = random.choice(['circle', 'square', 'triangle', 'oval', 'star'])
-        actions_dict[10] = {'actor':poi[-1], 'action': f'draws a {shape} on the wall'}
-        actions_dict[20] = {'actor':poi[-1], 'action': 'puts their phone on the ground'}
+        manual_actions_dict[10] = {'actor':poi[-1], 'action': f'draws a {shape} on the wall'}
+        manual_actions_dict[20] = {'actor':poi[-1], 'action': 'puts their phone on the ground'}
 
     experiment_info = {'cross path location': loc_1[0], 'poi':poi, "shape":shape}
     
-    return event_dict, actions_dict, (loc_2[0], loc_3[0]), experiment_info
+    return event_dict, manual_actions_dict, (loc_2[0], loc_3[0]), experiment_info
 
 
 
@@ -189,17 +189,17 @@ mislead_distance = 3
 random.seed(25)
 
 for _ in range(num_trials):
-    event_dict, action_dict, labels, experiment_dict = second_order_tom_extension(possible_people[:num_people], locations[:-1], graph, story_length, actions_done=False)
+    event_dict, manual_action_dict, labels, experiment_dict = second_order_tom_extension(possible_people[:num_people], locations[:-1], graph, story_length, manual_actions_done=False)
    
 
     sim = StorySimulator(
         people=possible_people[:num_people],
         locations=locations,
-        relation="is_moved_to",
+        action="is_moved_to",
         params={'prompt': '3', 'type': 'cot'},
         graph=graph,
         events=event_dict,
-        actions=action_dict
+        manual_actions=manual_action_dict
     )
     res = sim.run_simulation(story_length)
     

@@ -52,80 +52,6 @@ Experiment defitions
 
 '''
 
-# def mislead_experiment(actors, locs, g, mislead, length):
-#     poi = random.sample(actors, 2)
-#     loc = random.sample(locs, 1)
-#     second_loc = random.choice(g[loc[0]])
-#     third_loc = random.choice([l for l in g[second_loc] if l not in loc])
-#     event_dict = {}
-#     event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc, "path_type": "same"}
-#     event_dict[11] = {"name":"move", "actor":poi[-1], "location": second_loc}
-#     event_dict[12] = {"name": "exclusive_random", "actors": poi, "stop": 12 + mislead}
-#     event_dict[12 + mislead] = {"name":"move", "actor":poi[-1],"location":third_loc}
-#     event_dict[12 + mislead+1] = {"name": "exclusive_random", "actors": poi, "stop": length}
-#     experiment_info = {'cross path location': loc[0], 'poi':poi, 'last':third_loc}
-#     return event_dict, second_loc, experiment_info
-
-def spaced_mislead_experiment(actors, locs, g, mislead, length):
-    event_dict = {}
-    poi = random.sample(actors, 2)
-    loc = random.sample(locs, 1)
-    label = random.choice([l for l in g[loc[-1]] if l != loc[-1]])
-    event_dict[15] = {"name": "cross_paths","actors": poi, "location": loc}
-    event_dict[16] = {"name": "exclusive_random", "actors": poi, "stop": 17}
-    event_dict[17] = {"name":"move", "actor":poi[-1],"location":label}
-    event_dict[18] = {"name": "exclusive_random", "actors": poi, "stop": 18+mislead}
-    event_dict[18+mislead] = {"name": "mislead", "actors": poi}
-    event_dict[18 + mislead +1] = {"name": "exclusive_random", "actors": poi, "stop": length}
-    experiment_info = {'cross path location': loc[0], 'poi':poi}
-    return event_dict, label, experiment_info
-
-def number_of_moves_experiment(actors, locs, g, length):
-    poi = random.sample(actors, 2)
-    loc = random.sample(locs,1)
-    num_moves = 0
-    event_dict = {}
-    event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc, "path_type":"same"}
-    prev = loc[0]
-    movement = []
-    for i in range(1,num_moves+1):
-        new_loc = random.choice([l for l in g[prev] if l not in loc])
-        movement.append(new_loc)
-        event_dict[10+i] = {"name":"move", "actor":poi[-1], "location": new_loc}
-        prev = new_loc
-    #event_dict[10+num_moves+1] = {"name": "mislead", "actors": poi}
-    label =  movement[0]
-    event_dict[10+num_moves+1] = {"name": "exclusive_random", "actors": poi, "stop": length}
-    experiment_info = {'cross path location': loc[0], 'poi':poi}
-    return event_dict, label, experiment_info
-
-def second_order_tom_experiment(actors, locs, g, mislead, length):
-    poi = random.sample(actors, 3)
-    loc_1 = random.sample(locs,1)
-    loc_2 = random.choice(g[loc_1[0]])
-    loc_3 = random.choice([l for l in g[loc_2] if l != loc_1[0]], )
-    event_dict = {}
-    event_dict[10] = {"name": "cross_paths","actors": poi, "location": loc_1, "path_type":"same"}
-    event_dict[16] = {"name": "cross_paths","actors": poi[1:], "location": [loc_2], "path_type":"same", "prev":loc_1[0]}
-    event_dict[17] = {"name": "exclusive_random", "actors": poi, "stop": 17 + mislead}
-    event_dict[17 + mislead] = {"name":"move", "actor":poi[-1],"location":loc_3}
-    event_dict[17 + mislead + 1] = {"name": "exclusive_random", "actors": poi, "stop": length}
-    experiment_info = {'cross path locs': [loc_1, loc_2], 'poi': poi, 'last': loc_3}
-    return event_dict, loc_2, experiment_info
-    
-
-def cross_path_overlap(actors, locs, g, mislead, length, n):
-    poi = random.sample(actors, n)
-    loc = random.sample(locs, 1)
-    second_loc = random.choice(g[loc[0]])
-    event_dict = {}
-    event_dict[15] = {"name": "cross_paths","actors": poi, "location": loc, "path_type": "same"}
-    event_dict[16] = {"name":"move", "actor":poi[-1], "location": second_loc}
-    event_dict[17] = {"name": "exclusive_random", "actors": poi, "stop": 17 + mislead}
-    event_dict[17 + mislead] = {"name": "mislead", "actor": poi}
-    event_dict[17 + mislead+1] = {"name": "exclusive_random", "actors": poi, "stop": length}
-    experiment_info = {'cross path location': loc[0], 'poi':poi}
-    return event_dict, second_loc, experiment_info
 
 
 '''
@@ -160,16 +86,6 @@ for v in range(len(values)):
     print(f'Mislead = {values[v]}')
     df = pd.DataFrame({'Story':[], 'Label':[], 'P1':[], 'P2':[], 'Last':[], 'CP_Loc':[]})
     num_people = 7
-    
-    # graph = { 
-    #     "room_1": ["room_2", "the_hallway","room_5"],
-    #     "room_2": ["room_1", "room_3","the_hallway"],
-    #     "room_3": ["room_2", "room_4","the_hallway"],
-    #     "room_4": ["room_3", "room_5","room_1"],
-    #     "room_5": ["room_4", "room_1","room_2"],
-    #     "the_hallway": ["room_1", "room_4","room_2"]
-    # }
-
     graph = { 
         "hole_1": ["hole_2", "the_field","hole_5"],
         "hole_2": ["hole_1", "hole_3","the_field"],
@@ -195,8 +111,7 @@ for v in range(len(values)):
         sim = StorySimulator(
             people=possible_people[:num_people],
             locations=locations,
-            relation="enters",
-            params={'prompt': '3', 'type': 'cot'},
+            action="enters",
             storyboard=storyboard,
             graph=graph
         )
@@ -206,11 +121,9 @@ for v in range(len(values)):
         story = sim.formal_to_story(res)
         d = {'Story':[], 'Label':[], 'P1':[], 'P2':[]}
         d['P1'] = ','.join([storyboard.actor_mapping[str(a)] for a in range(int(max_actor))])
-        #print(d["P1"])
-        d['P2'] = storyboard.actor_mapping[str(int(max_actor))]
+        d['P2'] = storyboard.actor_mapping[max_actor]
         d['Story'].append(story)
         d['Label'].append(storyboard.loc_mapping[sorted(storyboard.loc_mapping.keys())[-2]])
-        #d['Last'] = experiment_dict['obj']
         df = pd.concat([df, pd.DataFrame(d)])   
     
     # Prompt model
