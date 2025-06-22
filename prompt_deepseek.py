@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import os
 import random
+from openai import OpenAI
 from storysim import StorySimulator
 from storyboard import Storyboard
 from experiment_defs import second_order_tom_experiment

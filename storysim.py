@@ -236,9 +236,17 @@ class StorySimulator:
                 sequences.append(f'*{manual_actions[self.time_step-1]}') 
         return sequences
     
-    def formal_to_story(self, sequence_list: list[str]):
+    
+    '''
+    Converts the events in the form of r(c, L) to a more natural sentence. Redefine this function as needed for custom parsing.
+    '''
+    def formal_to_story(self, sequence_list: list[str], custom_function: callable = None):
         strings = []
         for e in sequence_list:
+            if custom_function is not None:
+                strings.append(custom_function(e))
+                continue
+            # Basic parser used for experiments
             if e[0] == '*':
                 strings.append(e[1:])
             else:
