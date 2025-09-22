@@ -27,7 +27,8 @@ class Actor:
 
     def aid(self, actor):
         """ Randomly chooses to aid based on actor's trust level """
-        return True
+        p = self.trust[actor] / (self.maxTrust-self.minTrust)
+        return random.random() < p
 
     def __repr__(self):
         return self.name
