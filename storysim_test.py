@@ -1,9 +1,15 @@
+from storyactor import Actor
 from storysim import StorySimulator
 from storyboard import Storyboard
 import random
 
 possible_people = ["Alice", "Bob", "Charlie", "Danny", "Edward", "Frank", "Georgia", "Hank", "Isaac", "Jake", "Kevin"]
 num_people = 3
+
+possible_actors = []
+
+for person in possible_people: possible_actors.append(Actor(person, []))
+for actor in possible_actors: actor.set_actors(possible_actors)
 # graph = {
 #         "hole_1": ["hole_2", "field"],
 #         "hole_2": ["hole_1", "hole_3"],
@@ -84,15 +90,16 @@ for _ in range(num_trials):
     event_dict[1] = {"name":"move", "actors":['0'],"location":['0']}
     event_dict[5] = {"name": "cross_paths","actors": ['0','1'], "location": ['1'], "path_type": "same"}
     manual_action_dict[5] = {'action': '0 and 1 exchange phone numbers'}
+    manual_action_dict[7] = {'action': '0 asks 1 for aid'}
     event_dict[9] = {"name":"cross_paths","actors": ['0','1'], "location": ['2'], "path_type": "same"}
     manual_action_dict[9] = {'action': '0 calls their friends on the phone to tell them what happened'}
     storyboard = Storyboard('goes_to', graph, possible_people[:num_people], story_length, event_dict, manual_actions=manual_action_dict)
     
     sim = StorySimulator(
-        people=possible_people[:num_people],
+        people=possible_actors[:num_people],
         locations=locations,
         action=['goes_to', 'arrives_at', 'heads_to'],
-        params={},
+        # params={},
         storyboard=storyboard,
         graph=graph
     )
